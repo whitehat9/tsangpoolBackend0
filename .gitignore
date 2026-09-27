@@ -1,15 +1,20 @@
 # Dependencies
 node_modules/
 
-# Builds
-dist/
-
-# Environment variables
+# Environment variables / secrets
 .env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env.*
+!.env.example
+*.pem
+*.key
+serviceAccountKey.json
+google-cloud-auth.json
+Notes.txt
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
 
 # Logs
 logs/
@@ -18,39 +23,28 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Runtime data
-pids
-*.pid
-*.seed
-*.pid.lock
+# Caches
+.npm/
+.cache/
+coverage/
+.nyc_output/
 
-# Editor directories and files
-.idea/
-.vscode/
-*.swp
-*.swo
+# Local docs / notes
+docs/
+host.md
 
-# OS generated files
+# Local scratch & manual test scripts
+test-*.js
+scratch/
+tmp/
+temp/
+uploads/
+
+# OS files
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
 Thumbs.db
 
-# Coverage directory used by tools like istanbul
-coverage/
-
-# nyc test coverage
-.nyc_output
-
-# TypeScript cache
-*.tsbuildinfo
-
-# Upload directory for multer
-tsangpool-honda-otp-firebase-adminsdk-fbsvc-d12f0a6d9e.json
-tsangpool-honda-otp-firebase-adminsdk-fbsvc-d12f0a6d9e.json
-
+# Editor / IDE
 .vscode/
-.vscode/settings.json
+.idea/
+*.swp

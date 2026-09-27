@@ -248,13 +248,6 @@ export async function getAllServiceInvoices(
 
     const filter: Record<string, any> = scopeMatch(branch);
     if (req.query.needsReview === "true") filter.needsReview = true;
-    const date = req.query.date as string | undefined;
-    if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      const start = new Date(`${date}T00:00:00.000Z`);
-      const end = new Date(start);
-      end.setUTCDate(end.getUTCDate() + 1);
-      filter.jobCardClosedDate = { $gte: start, $lt: end };
-    }
     const q = (req.query.q as string | undefined)?.trim();
     if (q) {
       const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
