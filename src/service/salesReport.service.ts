@@ -34,11 +34,11 @@ export interface CuratedSalesReportFields {
 }
 
 /**
- * True only for the real binary spreadsheet magic bytes: ZIP (xlsx, "PK")
- * or OLE2/CFB (legacy xls, "D0 CF 11 E0"). Some dealer-export tools (a
- * Windows/.NET "Export to Excel" button, in practice) write plain delimited
- * text — often UTF-16-with-BOM — but still name the file .xlsx/.xls. Routing
- * those through the binary spreadsheet reader instead of the UTF-16-aware
+ * True only for the real binary spreadsheet magic bytes: ZIP (xlsx/xltx,
+ * "PK") or OLE2/CFB (legacy xls/xlt, "D0 CF 11 E0"). Some dealer-export tools
+ * (a Windows/.NET "Export to Excel" button, in practice) write plain delimited
+ * text — often UTF-16-with-BOM — but still name the file .xlsx/.xls/.xlt.
+ * Routing those through the binary spreadsheet reader instead of the UTF-16-aware
  * CSV decoder (dataImport.service.ts#decodeBuffer) silently mangles every
  * cell into BOM + null-interleaved garbage, so every column match fails at
  * once. Sniffing the actual bytes instead of trusting the extension is what
@@ -53,7 +53,7 @@ function looksLikeBinarySpreadsheet(buffer: Buffer): boolean {
     buffer[2] === 0x11 &&
     buffer[3] === 0xe0
   )
-    return true; // OLE2/CFB -> legacy xls
+    return true; // OLE2/CFB -> legacy xls / xlt
   return false;
 }
 
@@ -100,13 +100,16 @@ function repairMisdecodedUtf16(value: string): string {
  * dataImport.service.ts#detectHeaderRowIndex / #parseCsvBuffer) — the same
  * approach the ServiceJobcard import already relies on for this class of
  * export. Only CSV/XLS/XLSX ever reach here (multer rejects everything
- * else), so PDF's row-level needsReview flag never applies.
+ * else), so PDF's row-level needsReview flag never applies. The legacy Excel
+ * template extensions (.xlt/.xltx/.xltm) some older dealer tools still emit
+ * need no special handling beyond being admitted by multer — they are ordinary
+ * workbooks, and SheetJS reads them from the magic bytes.
  *
  * The effective filename passed down is content-sniffed rather than trusted
  * verbatim — see looksLikeBinarySpreadsheet — so a mislabeled UTF-16 text
  * file gets routed through the CSV/TSV decoder (with its BOM + delimiter
- * detection) regardless of its .xlsx/.xls extension. Every resulting column
- * name and cell value also passes through repairMisdecodedUtf16, since a
+ * detection) regardless of its .xlsx/.xls/.xlt extension. Every resulting
+ * column name and cell value also passes through repairMisdecodedUtf16, since a
  * *genuine* xlsx can independently have a broken shared-strings table that
  * mangles values the same way even once routing is correct.
  */
@@ -118,7 +121,7 @@ export async function parseSalesReport(
   const isRealBinarySpreadsheet = looksLikeBinarySpreadsheet(buffer);
   const effectiveFileName = isRealBinarySpreadsheet
     ? fileName
-    : fileName.replace(/\.(xlsx|xls)$/i, "") + ".csv";
+    : fileName.replace(/\.(xlsx|xlsm|xls|xltx|xltm|xlt)$/i, "") + ".csv";
   const effectiveMimeType = isRealBinarySpreadsheet ? mimeType : "text/csv";
 
   const parsed = await parseDataImportFile(buffer, effectiveFileName, effectiveMimeType, {

@@ -6,6 +6,7 @@ import {
   reindexRag,
   getRagSources,
 } from "../../controllers/Rag/rag.controller";
+import { generateKpi, getKpiMetrics } from "../../controllers/Rag/kpi.controller";
 
 const router = express.Router();
 
@@ -17,6 +18,11 @@ router.post("/query", askRag);
 
 // Which sources the current role may query
 router.get("/sources", getRagSources);
+
+// Prompt-driven KPI dashboards (Super-Admin only). Numbers come from the
+// whitelisted metric registry, never from the model — see kpiPlanner.ts.
+router.post("/kpi", authorize(ROLES.SUPER_ADMIN), generateKpi);
+router.get("/kpi/metrics", authorize(ROLES.SUPER_ADMIN), getKpiMetrics);
 
 // Rebuild embeddings (Super-Admin only)
 router.post("/reindex", authorize(ROLES.SUPER_ADMIN), reindexRag);
