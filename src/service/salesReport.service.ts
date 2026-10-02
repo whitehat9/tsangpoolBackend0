@@ -30,6 +30,13 @@ export interface CuratedSalesReportFields {
   status: string;
   purchaseType: string;
   totalPayment: number;
+  slNo: string;
+  saleDate?: Date;
+  location: string;
+  colour: string;
+  rto: string;
+  insurance: string;
+  hsrp: string;
   needsReview: boolean;
 }
 
@@ -189,6 +196,13 @@ export function extractCuratedFields(
     status: "Sold",
     purchaseType: normalized.purchaseType ?? "",
     totalPayment: normalized.totalPayment ?? 0,
+    slNo: normalized.slNo ?? "",
+    saleDate: normalized.saleDate,
+    location: normalized.location ?? "",
+    colour: normalized.colour ?? "",
+    rto: normalized.rto ?? "",
+    insurance: normalized.insurance ?? "",
+    hsrp: normalized.hsrp ?? "",
     needsReview: parseNeedsReview,
   };
 }

@@ -35,6 +35,24 @@ interface WelcomeEmailPayload {
   position?: string; // only for Staff
 }
 
+// ─── Login link per role ─────────────────────────────────────────────────────
+
+// Mirrors the client login routes (client/src/config/routeutils.ts). Keys are
+// the role strings the user-management controller passes to sendWelcomeEmail.
+const LOGIN_PATH_BY_ROLE: Record<string, string> = {
+  "Branch-Admin": "/manager-login",
+  "Service-Admin": "/service-admin/login",
+  "Part-Admin": "/part-admin/login",
+  Staff: "/staff-login",
+  Developer: "/developer/login",
+};
+
+const getLoginUrl = (role: string): string | null => {
+  const path = LOGIN_PATH_BY_ROLE[role];
+  const base = (process.env.FRONTEND_URL || "").replace(/\/+$/, "");
+  return path && base ? `${base}${path}` : null;
+};
+
 // ─── Send Welcome Email ──────────────────────────────────────────────────────
 
 export const sendWelcomeEmail = async (
@@ -65,6 +83,16 @@ export const sendWelcomeEmail = async (
     ? ` at <strong>${payload.branchName}</strong>`
     : "";
 
+  const loginUrl = getLoginUrl(payload.role);
+  const loginButton = loginUrl
+    ? `<p style="text-align:center;margin:0 0 24px;">
+              <a href="${loginUrl}" style="display:inline-block;background:#cc0000;color:#fff;text-decoration:none;font-weight:600;font-size:15px;padding:12px 28px;border-radius:6px;">Sign in as ${payload.role}</a>
+            </p>
+            <p style="font-size:12px;color:#888;margin:0 0 24px;text-align:center;word-break:break-all;">
+              Or open this link: <a href="${loginUrl}" style="color:#cc0000;">${loginUrl}</a>
+            </p>`
+    : "";
+
   const html = `
     <!DOCTYPE html>
     <html>
@@ -92,6 +120,8 @@ export const sendWelcomeEmail = async (
               ${branchLine}
               ${positionLine}
             </table>
+
+            ${loginButton}
 
             <p style="font-size:13px;color:#999;margin:0;">
               This is an auto-generated email. Do not share your credentials with anyone.

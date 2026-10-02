@@ -15,6 +15,9 @@ export interface IBaseCustomer extends Document {
   // phone number — the customer's complimentary FREE_SERVICES (see
   // types/serviceBooking.types.ts) are no longer bookable once true.
   freeServicesDisabled: boolean;
+  // Free-text location from an imported SalesReport row; filled once, never
+  // overwritten by a later import.
+  location?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -59,6 +62,10 @@ const baseCustomerSchema = new Schema<IBaseCustomer>(
     freeServicesDisabled: {
       type: Boolean,
       default: false,
+    },
+    location: {
+      type: String,
+      trim: true,
     },
   },
   {

@@ -31,6 +31,16 @@ export interface ISalesReport extends Document {
   purchaseType: string;
   totalPayment: number;
 
+  // Alternative-layout columns (Sl No / DATE / LOCATION / COLOUR / Rto /
+  // Insurance / HSRP) — populated only when the uploaded file carries them.
+  slNo?: string;
+  saleDate?: Date;
+  location?: string;
+  colour?: string;
+  rto?: string;
+  insurance?: string;
+  hsrp?: string;
+
   // Row-processing outcome (see processSalesReportRow.service.ts)
   matchOutcome:
     | "matched_status_flipped"
@@ -130,6 +140,13 @@ const SalesReportSchema = new Schema<ISalesReport>(
       type: Number,
       default: 0,
     },
+    slNo: { type: String, default: "" },
+    saleDate: { type: Date },
+    location: { type: String, default: "" },
+    colour: { type: String, default: "" },
+    rto: { type: String, default: "" },
+    insurance: { type: String, default: "" },
+    hsrp: { type: String, default: "" },
     matchOutcome: {
       type: String,
       enum: [

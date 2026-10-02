@@ -7,7 +7,10 @@ import {
   extractCuratedFields,
 } from "../../service/salesReport.service";
 import { matchSalesReportColumns } from "../../utils/salesReportColumnMatcher";
-import { processSalesReportRow } from "../../service/salesReport/processSalesReportRow.service";
+import {
+  processSalesReportRow,
+  lookupExShowroom,
+} from "../../service/salesReport/processSalesReportRow.service";
 import { getUserBranch, isAdmin } from "../../types/user.types";
 import logger from "../../utils/logger";
 import { notify } from "../../service/pushNotification.service";
@@ -132,6 +135,7 @@ export const importSalesReport = asyncHandler(
             customerFirstName: curated.customerFirstName,
             customerLastName: curated.customerLastName,
             customerMobile: curated.customerMobile,
+            location: curated.location,
             frameNo: curated.frameNo,
             engineNo: curated.engineNo,
             purchaseType: curated.purchaseType,
@@ -150,7 +154,7 @@ export const importSalesReport = asyncHandler(
           detectedColumns: parsed.columns,
           sourceFormat: parsed.format,
           modelName: curated.modelName,
-          modelVariant: curated.modelVariant,
+          modelVariant: curated.modelVariant || outcome.modelVariant || "",
           customerFirstName: curated.customerFirstName,
           customerLastName: curated.customerLastName,
           customerMobile: curated.customerMobile,
@@ -158,7 +162,17 @@ export const importSalesReport = asyncHandler(
           engineNo: curated.engineNo,
           status: curated.status,
           purchaseType: curated.purchaseType,
-          totalPayment: curated.totalPayment,
+          totalPayment:
+            curated.totalPayment ||
+            outcome.totalPayment ||
+            (await lookupExShowroom(null, curated.modelName)),
+          slNo: curated.slNo,
+          saleDate: curated.saleDate,
+          location: curated.location,
+          colour: curated.colour,
+          rto: curated.rto,
+          insurance: curated.insurance,
+          hsrp: curated.hsrp,
           matchOutcome: outcome.outcome,
           matched: outcome.matched,
           needsReview: curated.needsReview || outcome.needsReview,
