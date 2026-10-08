@@ -107,7 +107,11 @@ export async function computeAccidentReportStats(branch: BranchScope) {
  * `stockStatus.branchId`, which is populated regardless of sale status, so
  * scoping this is a direct match unlike VAS assignment below.
  */
-export async function computeStockAssignStats(branch: BranchScope, year: number) {
+export async function computeStockAssignStats(
+  branch: BranchScope,
+  year: number,
+  includeDaily = false,
+) {
   const baseMatch: Record<string, any> = { "salesInfo.soldDate": { $exists: true } };
   if (branch !== "all") baseMatch["stockStatus.branchId"] = branch;
 
@@ -119,7 +123,7 @@ export async function computeStockAssignStats(branch: BranchScope, year: number)
     },
   };
 
-  const [monthly, totals, byPaymentStatus] = await Promise.all([
+  const [monthly, totals, byPaymentStatus, daily] = await Promise.all([
     StockConceptModel.aggregate([
       { $match: yearMatch },
       {
@@ -145,6 +149,20 @@ export async function computeStockAssignStats(branch: BranchScope, year: number)
       { $match: baseMatch },
       { $group: { _id: "$salesInfo.paymentStatus", count: { $sum: 1 } } },
     ]),
+    // Per sold date — opt-in so the RAG structured path's prompt stays small.
+    includeDaily
+      ? StockConceptModel.aggregate([
+          { $match: yearMatch },
+          {
+            $group: {
+              _id: { $dateToString: { format: "%Y-%m-%d", date: "$salesInfo.soldDate" } },
+              assignedCount: { $sum: 1 },
+              revenue: { $sum: "$salesInfo.salePrice" },
+            },
+          },
+          { $sort: { _id: 1 } },
+        ])
+      : Promise.resolve([] as any[]),
   ]);
 
   const monthlyFilled = MONTHS.map((label, i) => {
@@ -161,6 +179,13 @@ export async function computeStockAssignStats(branch: BranchScope, year: number)
   return {
     year,
     monthly: monthlyFilled,
+    ...(includeDaily && {
+      daily: daily.map((d) => ({
+        date: d._id as string,
+        assignedCount: d.assignedCount as number,
+        revenue: d.revenue as number,
+      })),
+    }),
     totals: {
       totalAssigned: t.totalAssigned,
       totalRevenue: t.totalRevenue,
@@ -177,7 +202,11 @@ export async function computeStockAssignStats(branch: BranchScope, year: number)
  * references — so this needs a $lookup before it can be branch-scoped,
  * unlike the other structured sources.
  */
-export async function computeVasAssignStats(branch: BranchScope, year: number) {
+export async function computeVasAssignStats(
+  branch: BranchScope,
+  year: number,
+  includeDaily = false,
+) {
   const basePipeline: any[] = [
     { $unwind: "$activeValueAddedServices" },
     {
@@ -194,7 +223,14 @@ export async function computeVasAssignStats(branch: BranchScope, year: number) {
     basePipeline.push({ $match: { "stock.stockStatus.branchId": branch } });
   }
 
-  const [monthly, totals] = await Promise.all([
+  const yearMatchVas = {
+    "activeValueAddedServices.activatedDate": {
+      $gte: new Date(`${year}-01-01`),
+      $lt: new Date(`${year + 1}-01-01`),
+    },
+  };
+
+  const [monthly, totals, daily] = await Promise.all([
     CustomerVehicleModel.aggregate([
       ...basePipeline,
       {
@@ -224,6 +260,20 @@ export async function computeVasAssignStats(branch: BranchScope, year: number) {
         },
       },
     ]),
+    includeDaily
+      ? CustomerVehicleModel.aggregate([
+          ...basePipeline,
+          { $match: yearMatchVas },
+          {
+            $group: {
+              _id: { $dateToString: { format: "%Y-%m-%d", date: "$activeValueAddedServices.activatedDate" } },
+              activationCount: { $sum: 1 },
+              revenue: { $sum: "$activeValueAddedServices.purchasePrice" },
+            },
+          },
+          { $sort: { _id: 1 } },
+        ])
+      : Promise.resolve([] as any[]),
   ]);
 
   const monthlyFilled = MONTHS.map((label, i) => {
@@ -240,6 +290,13 @@ export async function computeVasAssignStats(branch: BranchScope, year: number) {
   return {
     year,
     monthly: monthlyFilled,
+    ...(includeDaily && {
+      daily: daily.map((d) => ({
+        date: d._id as string,
+        activationCount: d.activationCount as number,
+        revenue: d.revenue as number,
+      })),
+    }),
     totals: {
       totalActivations: t.totalActivations,
       totalRevenue: t.totalRevenue,

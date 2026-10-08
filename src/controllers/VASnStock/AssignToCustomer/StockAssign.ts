@@ -196,7 +196,7 @@ export const getCSVStockAssignStats = asyncHandler(
       },
     };
 
-    const [monthly, totals] = await Promise.all([
+    const [monthly, totals, daily] = await Promise.all([
       StockConceptCSVModel.aggregate([
         { $match: yearMatch },
         {
@@ -216,6 +216,16 @@ export const getCSVStockAssignStats = asyncHandler(
             totalRevenue: { $sum: "$salesInfo.salePrice" },
           },
         },
+      ]),
+      StockConceptCSVModel.aggregate([
+        { $match: yearMatch },
+        {
+          $group: {
+            _id: { $dateToString: { format: "%Y-%m-%d", date: "$salesInfo.soldDate" } },
+            assignedCount: { $sum: 1 },
+          },
+        },
+        { $sort: { _id: 1 } },
       ]),
     ]);
 
@@ -251,6 +261,10 @@ export const getCSVStockAssignStats = asyncHandler(
           totalRevenue: t.totalRevenue,
         },
         monthly: monthlyFilled,
+        daily: daily.map((d) => ({
+          date: d._id,
+          assignedCount: d.assignedCount,
+        })),
       },
     });
   },

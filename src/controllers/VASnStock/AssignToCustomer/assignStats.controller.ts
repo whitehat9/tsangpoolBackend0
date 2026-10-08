@@ -28,7 +28,7 @@ export const getStockAssignStats = asyncHandler(
     }
 
     const year = Number(req.query.year) || new Date().getFullYear();
-    const data = await computeStockAssignStats(scope, year);
+    const data = await computeStockAssignStats(scope, year, true);
 
     res.status(200).json({ success: true, data });
   },
@@ -53,7 +53,7 @@ export const getVasAssignStats = asyncHandler(
     }
 
     const year = Number(req.query.year) || new Date().getFullYear();
-    const data = await computeVasAssignStats(scope, year);
+    const data = await computeVasAssignStats(scope, year, true);
 
     res.status(200).json({ success: true, data });
   },
@@ -119,7 +119,7 @@ export const getCombinedVasAssignStats = asyncHandler(
       });
     }
 
-    const [monthly, totals] = await Promise.all([
+    const [monthly, totals, daily] = await Promise.all([
       CustomerVehicleModel.aggregate([
         ...basePipeline,
         { $unwind: "$activeValueAddedServices" },
@@ -156,6 +156,27 @@ export const getCombinedVasAssignStats = asyncHandler(
             totalRevenue: { $sum: "$activeValueAddedServices.purchasePrice" },
           },
         },
+      ]),
+      CustomerVehicleModel.aggregate([
+        ...basePipeline,
+        { $unwind: "$activeValueAddedServices" },
+        {
+          $match: {
+            "activeValueAddedServices.isActive": true,
+            "activeValueAddedServices.activatedDate": {
+              $gte: new Date(`${year}-01-01`),
+              $lt: new Date(`${year + 1}-01-01`),
+            },
+          },
+        },
+        {
+          $group: {
+            _id: { $dateToString: { format: "%Y-%m-%d", date: "$activeValueAddedServices.activatedDate" } },
+            activationCount: { $sum: 1 },
+            revenue: { $sum: "$activeValueAddedServices.purchasePrice" },
+          },
+        },
+        { $sort: { _id: 1 } },
       ]),
     ]);
 
@@ -194,6 +215,11 @@ export const getCombinedVasAssignStats = asyncHandler(
           totalRevenue: t.totalRevenue,
         },
         monthly: monthlyFilled,
+        daily: daily.map((d) => ({
+          date: d._id,
+          activationCount: d.activationCount,
+          revenue: d.revenue,
+        })),
       },
     });
   },

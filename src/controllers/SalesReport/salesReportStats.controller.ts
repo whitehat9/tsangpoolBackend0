@@ -47,12 +47,30 @@ export const getAllSalesReports = asyncHandler(
     }
     if (req.query.purchaseType) query.purchaseType = req.query.purchaseType;
 
+    // Sale-date window (yyyy-mm-dd, `to` exclusive) — what the dashboards use
+    // to list the sales behind a selected month.
+    const from = req.query.from ? new Date(String(req.query.from)) : null;
+    const to = req.query.to ? new Date(String(req.query.to)) : null;
+    if (
+      (from && Number.isNaN(from.getTime())) ||
+      (to && Number.isNaN(to.getTime()))
+    ) {
+      res.status(400);
+      throw new Error("Invalid from/to date");
+    }
+    if (from || to) {
+      query.saleDate = {
+        ...(from && { $gte: from }),
+        ...(to && { $lt: to }),
+      };
+    }
+
     const [rows, total] = await Promise.all([
       SalesReportModel.find(query)
         .populate("branchId", "branchName")
         .skip(skip)
         .limit(limit)
-        .sort({ createdAt: -1 }),
+        .sort(from || to ? { saleDate: -1, createdAt: -1 } : { createdAt: -1 }),
       SalesReportModel.countDocuments(query),
     ]);
 
@@ -271,7 +289,7 @@ export const getSalesReportKpis = asyncHandler(
       },
     };
 
-    const [monthly, byPurchaseType, byOutcome, perBranch, totals] =
+    const [monthly, daily, dailyByPurchaseType, byPurchaseType, byOutcome, perBranch, totals] =
       await Promise.all([
         SalesReportModel.aggregate([
           { $match: yearMatch },
@@ -283,6 +301,50 @@ export const getSalesReportKpis = asyncHandler(
             },
           },
           { $sort: { "_id.month": 1 } },
+        ]),
+        // Per sale date (the Date column on the rows) rather than importDate:
+        // a whole batch is imported on one day, which would pile every sale
+        // into a single point.
+        SalesReportModel.aggregate([
+          {
+            $match: {
+              ...baseMatch,
+              saleDate: {
+                $gte: new Date(`${year}-01-01`),
+                $lt: new Date(`${year + 1}-01-01`),
+              },
+            },
+          },
+          {
+            $group: {
+              _id: { $dateToString: { format: "%Y-%m-%d", date: "$saleDate" } },
+              count: { $sum: 1 },
+              totalPayment: { $sum: { $ifNull: ["$totalPayment", 0] } },
+            },
+          },
+          { $sort: { _id: 1 } },
+        ]),
+        SalesReportModel.aggregate([
+          {
+            $match: {
+              ...baseMatch,
+              saleDate: {
+                $gte: new Date(`${year}-01-01`),
+                $lt: new Date(`${year + 1}-01-01`),
+              },
+            },
+          },
+          {
+            $group: {
+              _id: {
+                date: { $dateToString: { format: "%Y-%m-%d", date: "$saleDate" } },
+                purchaseType: { $ifNull: ["$purchaseType", ""] },
+              },
+              count: { $sum: 1 },
+              totalPayment: { $sum: { $ifNull: ["$totalPayment", 0] } },
+            },
+          },
+          { $sort: { "_id.date": 1 } },
         ]),
         SalesReportModel.aggregate([
           { $match: baseMatch },
@@ -383,6 +445,17 @@ export const getSalesReportKpis = asyncHandler(
           matchedStockNotFlipped: t.matchedStockNotFlipped ?? 0,
         },
         monthly: monthlyFilled,
+        daily: daily.map((d) => ({
+          date: d._id,
+          count: d.count,
+          totalPayment: d.totalPayment,
+        })),
+        dailyByPurchaseType: dailyByPurchaseType.map((d) => ({
+          date: d._id.date,
+          purchaseType: d._id.purchaseType || "Unspecified",
+          count: d.count,
+          totalPayment: d.totalPayment,
+        })),
         byPurchaseType: byPurchaseType.map((p) => ({
           purchaseType: p._id || "Unknown",
           count: p.count,

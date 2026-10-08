@@ -589,7 +589,7 @@ export const getB2BSalesKPIs = asyncHandler(async (req: Request, res: Response) 
   const match: Record<string, any> = { isActive: true };
   if (branch) match.branchId = new mongoose.Types.ObjectId(branch);
 
-  const [totals, monthlyTrendRaw, topItemsRaw, branchBreakdownRaw] = await Promise.all([
+  const [totals, monthlyTrendRaw, dailyTrendRaw, topItemsRaw, branchBreakdownRaw] = await Promise.all([
     B2BSalesModel.aggregate([
       { $match: match },
       {
@@ -616,6 +616,18 @@ export const getB2BSalesKPIs = asyncHandler(async (req: Request, res: Response) 
         },
       },
       { $sort: { "_id.year": 1, "_id.month": 1 } },
+    ]),
+    B2BSalesModel.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m-%d", date: "$date" } },
+          challanCount: { $sum: 1 },
+          totalPrice: { $sum: "$totalPrice" },
+          payablePrice: { $sum: "$payablePrice" },
+        },
+      },
+      { $sort: { _id: 1 } },
     ]),
     B2BSalesModel.aggregate([
       { $match: match },
@@ -686,6 +698,12 @@ export const getB2BSalesKPIs = asyncHandler(async (req: Request, res: Response) 
         challanCount: m.challanCount,
         totalPrice: m.totalPrice,
         payablePrice: m.payablePrice,
+      })),
+      dailyTrend: dailyTrendRaw.map((d: any) => ({
+        date: d._id,
+        challanCount: d.challanCount,
+        totalPrice: d.totalPrice,
+        payablePrice: d.payablePrice,
       })),
       topItems: topItemsRaw.map((t: any) => ({
         modelName: t._id,
