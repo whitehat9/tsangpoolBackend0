@@ -20,6 +20,7 @@ export interface SalesReportNormalizedRow {
   engineNo?: string;
   purchaseType?: string;
   totalPayment?: number;
+  // saleDate is mandatory in every layout (see SALES_REPORT_FIELDS).
   // Alternative ("Sl No / DATE / CUSTOMER NAME / PHONE NO. / LOCATION / ...")
   // layout. All optional — imported whenever the file carries the column.
   slNo?: string;
@@ -57,7 +58,7 @@ const SALES_REPORT_FIELDS: SalesReportField[] = [
   // --- Alternative layout columns (optional; stored whenever present) ---
   { key: "customerName", label: "Customer Name", required: false, aliases: ["Customer Name", "Name"] },
   { key: "slNo", label: "Sl No", required: false, aliases: ["Sl No", "Sl. No", "S No", "Serial No"] },
-  { key: "saleDate", label: "Date", required: false, aliases: ["Date", "Sale Date", "Sold Date"] },
+  { key: "saleDate", label: "Date", required: true, aliases: ["Date", "Sale Date", "Sold Date"] },
   { key: "location", label: "Location", required: false, aliases: ["Location"] },
   { key: "colour", label: "Colour", required: false, aliases: ["Colour", "Color"] },
   { key: "rto", label: "RTO", required: false, aliases: ["RTO"] },

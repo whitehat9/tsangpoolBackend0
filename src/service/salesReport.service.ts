@@ -185,6 +185,11 @@ export function extractCuratedFields(
     throw new Error('Missing "Frame No" — required for de-duplication');
   }
 
+  // Date is mandatory: a blank cell and an unparseable one both reject the row.
+  if (!normalized.saleDate) {
+    throw new Error('Missing or unreadable "Date" — required (use dd/mm/yyyy)');
+  }
+
   return {
     modelName: normalized.modelName ?? "",
     modelVariant: normalized.modelVariant ?? "",

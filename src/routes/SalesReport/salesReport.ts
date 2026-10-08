@@ -13,6 +13,10 @@ import {
   getSalesReportKpis,
 } from "../../controllers/SalesReport/salesReportStats.controller";
 import {
+  updateSalesReportRow,
+  deleteSalesReportRow,
+} from "../../controllers/SalesReport/salesReportRow.controller";
+import {
   deleteSalesReportBatch,
   getDeletedSalesReportBatches,
 } from "../../controllers/SalesReport/salesReportDelete.controller";
@@ -63,6 +67,19 @@ router.get(
   "/kpis",
   authorize("Super-Admin", "Branch-Admin"),
   getSalesReportKpis,
+);
+
+// Edit / delete a single row — Super-Admin (any), Branch-Admin (own branch)
+router.patch(
+  "/:id",
+  authorize("Super-Admin", "Branch-Admin"),
+  updateSalesReportRow,
+);
+
+router.delete(
+  "/:id",
+  authorize("Super-Admin", "Branch-Admin"),
+  deleteSalesReportRow,
 );
 
 router.get(
