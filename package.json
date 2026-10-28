@@ -19,7 +19,8 @@
     "invoice:migrate-pending": "ts-node src/scripts/migratePendingStock.ts",
     "visitor:seed": "ts-node src/scripts/seedVisitorCount.ts",
     "admin:seed": "ts-node src/scripts/seedSuperAdmin.ts",
-    "sales-report:backfill-customers": "ts-node src/scripts/backfillSalesReportCustomers.ts"
+    "sales-report:backfill-customers": "ts-node src/scripts/backfillSalesReportCustomers.ts",
+    "sales-report:reprice": "ts-node src/scripts/repriceSalesReports.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",

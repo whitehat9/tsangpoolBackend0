@@ -234,16 +234,81 @@ export function parseDelimitedText(
   return recordsFromMatrix(matrix, expectedHeaders);
 }
 
+/** Opt-in worksheet rewrites applied before the sheet is flattened to rows. */
+export interface SpreadsheetCellOptions {
+  /**
+   * Copy a single-column merged cell's value into every row it spans. SheetJS
+   * (like Excel) stores a merged value only in the range's top-left cell, so a
+   * register that merges one DATE cell down a whole day's sales reads as one
+   * dated row followed by blank ones. Ranges wider than one column are left
+   * alone — those are title banners or annotations, and copying them across
+   * would write their text into unrelated columns. Rows that are otherwise
+   * empty stay empty, so a merge running past a day's last sale doesn't
+   * turn blank rows into failed ones.
+   */
+  fillMergedCells?: boolean;
+  /**
+   * Emit date-formatted numeric cells as yyyy-mm-dd instead of their display
+   * text. The display text follows the cell's number format (m/d/yy, dd-mm-yy,
+   * ...), so parsing it means guessing day vs month order; the serial value
+   * underneath is unambiguous.
+   */
+  isoDates?: boolean;
+}
+
+function applyCellOptions(
+  sheet: XLSX.WorkSheet,
+  opts: SpreadsheetCellOptions,
+): void {
+  if (opts.isoDates) {
+    const pad = (n: number) => String(n).padStart(2, "0");
+    for (const addr of Object.keys(sheet)) {
+      if (addr.startsWith("!")) continue;
+      const cell = sheet[addr] as XLSX.CellObject;
+      if (cell.t !== "n" || !cell.z || !XLSX.SSF.is_date(cell.z)) continue;
+      const parts = XLSX.SSF.parse_date_code(cell.v);
+      if (parts) cell.w = `${parts.y}-${pad(parts.m)}-${pad(parts.d)}`;
+    }
+  }
+
+  if (opts.fillMergedCells && sheet["!ref"]) {
+    const { s: first, e: last } = XLSX.utils.decode_range(sheet["!ref"]);
+    const rowHasOtherContent = (r: number, skipCol: number) => {
+      for (let c = first.c; c <= last.c; c++) {
+        if (c === skipCol) continue;
+        const cell = sheet[XLSX.utils.encode_cell({ r, c })];
+        if (cell && String(cell.w ?? cell.v ?? "").trim() !== "") return true;
+      }
+      return false;
+    };
+
+    for (const range of sheet["!merges"] ?? []) {
+      if (range.s.c !== range.e.c) continue;
+      const source = sheet[XLSX.utils.encode_cell(range.s)];
+      if (!source) continue;
+      for (let r = range.s.r + 1; r <= range.e.r; r++) {
+        if (!rowHasOtherContent(r, range.s.c)) continue;
+        sheet[XLSX.utils.encode_cell({ r, c: range.s.c })] = { ...source };
+      }
+    }
+  }
+}
+
 /** Parse an XLSX/XLS buffer into row objects via SheetJS. */
 export function parseSpreadsheet(
   buffer: Buffer,
   format: SourceFormat,
   sheetName?: string,
   expectedHeaders?: string[],
+  cellOptions: SpreadsheetCellOptions = {},
 ): ParsedReport {
   // SheetJS auto-detects .xls (BIFF) vs .xlsx (OOXML) from the buffer's
-  // magic bytes, so no separate BIFF handling is needed.
-  const workbook = XLSX.read(buffer, { type: "buffer" });
+  // magic bytes, so no separate BIFF handling is needed. cellNF keeps each
+  // cell's number format, which isoDates needs to recognise a date cell.
+  const workbook = XLSX.read(buffer, {
+    type: "buffer",
+    cellNF: !!cellOptions.isoDates,
+  });
   const sheetNames = workbook.SheetNames;
   const targetSheet =
     sheetName && sheetNames.includes(sheetName) ? sheetName : sheetNames[0];
@@ -253,6 +318,7 @@ export function parseSpreadsheet(
   }
 
   const sheet = workbook.Sheets[targetSheet];
+  applyCellOptions(sheet, cellOptions);
   // header: 1 returns raw cell rows so the true header can be detected below;
   // defval: "" keeps empty cells so column positions stay stable across rows.
   const matrix = XLSX.utils.sheet_to_json<any[]>(sheet, {
@@ -355,7 +421,11 @@ export async function parseDataImportFile(
   buffer: Buffer,
   fileName: string,
   mimeType?: string,
-  opts?: { sheetName?: string; expectedHeaders?: string[] },
+  opts?: {
+    sheetName?: string;
+    expectedHeaders?: string[];
+    cellOptions?: SpreadsheetCellOptions;
+  },
 ): Promise<ParsedReport> {
   const format = detectSourceFormat(fileName, mimeType);
   if (format === "pdf") {
@@ -364,5 +434,11 @@ export async function parseDataImportFile(
   if (format === "csv") {
     return parseCsvBuffer(buffer, opts?.expectedHeaders);
   }
-  return parseSpreadsheet(buffer, format, opts?.sheetName, opts?.expectedHeaders);
+  return parseSpreadsheet(
+    buffer,
+    format,
+    opts?.sheetName,
+    opts?.expectedHeaders,
+    opts?.cellOptions,
+  );
 }

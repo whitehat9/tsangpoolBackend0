@@ -11,6 +11,7 @@ import userManagementRoutes from "./routes/AdminFeature/userManagement";
 
 import bikes from "./routes/BikeSystemRoutes/bikes.routes";
 import bikeImages from "./routes/BikeSystemRoutes/bikeImages.routes";
+import bikePrices from "./routes/BikeSystemRoutes/bikePrices.routes";
 import enquiryRoutes from "./routes/CustomerRequest/enquiryForm";
 import branchRoutes from "./routes/AdminFeature/branches";
 import cloudinaryRoutes from "./routes/cloudinary";
@@ -92,6 +93,7 @@ app.use("/api/branch", branchRoutes);
 // Bike System
 app.use("/api/bikes", bikes);
 app.use("/api/bike-images", bikeImages);
+app.use("/api/bike-prices", bikePrices);
 app.use("/api/stock-concept", stockConceptRoutes);
 app.use("/api/value-added-services", valueAddedServicesRoutes);
 app.use("/api/csv-stock", csvStockImportRoutes);

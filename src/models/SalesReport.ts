@@ -27,16 +27,24 @@ export interface ISalesReport extends Document {
   customerMobile: string;
   frameNo: string;
   engineNo: string;
-  status: string; // fixed literal "Sold", not CSV-extracted
+  status: string; // the file's STATUS column; "Sold" when it has none
   purchaseType: string;
   totalPayment: number;
 
-  // Alternative-layout columns (Sl No / DATE / LOCATION / COLOUR / Rto /
-  // Insurance / HSRP) — populated only when the uploaded file carries them.
+  // Sales-register columns (SL NO. / DATE / LOCATION / COLOUR / EW / AMC /
+  // RSA / JOY CLUB / FINANCE / EXECUTIVE) plus the older Rto / Insurance /
+  // HSRP — populated only when the uploaded file carries them.
   slNo?: string;
   saleDate?: Date;
   location?: string;
   colour?: string;
+  /** EW / AMC / RSA / JOY CLUB are the register's 1 / 0 flags, kept as written. */
+  ew?: string;
+  amc?: string;
+  rsa?: string;
+  joyClub?: string;
+  finance?: string;
+  executive?: string;
   rto?: string;
   insurance?: string;
   hsrp?: string;
@@ -144,6 +152,12 @@ const SalesReportSchema = new Schema<ISalesReport>(
     saleDate: { type: Date },
     location: { type: String, default: "" },
     colour: { type: String, default: "" },
+    ew: { type: String, default: "" },
+    amc: { type: String, default: "" },
+    rsa: { type: String, default: "" },
+    joyClub: { type: String, default: "" },
+    finance: { type: String, default: "" },
+    executive: { type: String, default: "" },
     rto: { type: String, default: "" },
     insurance: { type: String, default: "" },
     hsrp: { type: String, default: "" },

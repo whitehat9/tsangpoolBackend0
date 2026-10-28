@@ -3,6 +3,7 @@ import { Request, Response } from "express";
 import mongoose from "mongoose";
 import { SalesReportModel } from "../../models/SalesReport";
 import { normalizePhone } from "../../service/salesReport.service";
+import { splitFullName } from "../../utils/salesReportColumnMatcher";
 import { getUserBranch, getUserRole, isAdmin } from "../../types/user.types";
 
 /**
@@ -56,11 +57,30 @@ export const updateSalesReportRow = asyncHandler(
     row.saleDate = saleDate;
 
     if (body.modelName !== undefined) row.modelName = str(body.modelName);
+    // The edit form has one "Customer Name" field; it is split the same way an
+    // imported Customer Name cell is. Separate first/last are still accepted.
+    if (body.customerName !== undefined) {
+      const { first, last } = splitFullName(str(body.customerName));
+      row.customerFirstName = first;
+      row.customerLastName = last;
+    }
     if (body.customerFirstName !== undefined)
       row.customerFirstName = str(body.customerFirstName);
     if (body.customerLastName !== undefined)
       row.customerLastName = str(body.customerLastName);
     if (body.location !== undefined) row.location = str(body.location);
+    for (const key of [
+      "colour",
+      "ew",
+      "amc",
+      "rsa",
+      "joyClub",
+      "finance",
+      "executive",
+    ] as const) {
+      if (body[key] !== undefined) row[key] = str(body[key]);
+    }
+    if (body.status !== undefined) row.status = str(body.status) || "Sold";
     if (body.purchaseType !== undefined)
       row.purchaseType = str(body.purchaseType);
     if (body.engineNo !== undefined)

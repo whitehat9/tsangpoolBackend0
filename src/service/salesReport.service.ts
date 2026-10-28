@@ -34,6 +34,12 @@ export interface CuratedSalesReportFields {
   saleDate?: Date;
   location: string;
   colour: string;
+  ew: string;
+  amc: string;
+  rsa: string;
+  joyClub: string;
+  finance: string;
+  executive: string;
   rto: string;
   insurance: string;
   hsrp: string;
@@ -131,8 +137,11 @@ export async function parseSalesReport(
     : fileName.replace(/\.(xlsx|xlsm|xls|xltx|xltm|xlt)$/i, "") + ".csv";
   const effectiveMimeType = isRealBinarySpreadsheet ? mimeType : "text/csv";
 
+  // Sales registers merge one DATE cell down each day's rows, and their date
+  // cells are real Excel dates — see SpreadsheetCellOptions.
   const parsed = await parseDataImportFile(buffer, effectiveFileName, effectiveMimeType, {
     expectedHeaders: getSalesReportHeaderAliases(),
+    cellOptions: { fillMergedCells: true, isoDates: true },
   });
 
   const repairedColumns = parsed.columns.map(repairMisdecodedUtf16);
@@ -151,6 +160,32 @@ export async function parseSalesReport(
     columns: repairedColumns,
     rows: repairedRows,
   };
+}
+
+/**
+ * A sales register writes each day's DATE once, in a cell merged down that
+ * day's rows. A spreadsheet upload keeps the merge (see parseSalesReport), but
+ * a CSV export flattens it to the first row with blanks under it — so a blank
+ * DATE is read as "same day as the row above". The first row's DATE must still
+ * be filled in; a blank there has nothing to inherit and is rejected.
+ */
+export function carryDateForward(
+  rows: ParsedRow[],
+  matchResult: SalesReportColumnMatchResult,
+): void {
+  const dateColumn = matchResult.matchedFields.find(
+    (f) => f.canonicalKey === "saleDate",
+  )?.sourceColumn;
+  if (!dateColumn) return;
+
+  let lastDate: unknown;
+  for (const { data } of rows) {
+    if (String(data[dateColumn] ?? "").trim() === "") {
+      if (lastDate !== undefined) data[dateColumn] = lastDate;
+    } else {
+      lastDate = data[dateColumn];
+    }
+  }
 }
 
 const PHONE_REGEX = /^[6-9]\d{9}$/;
@@ -182,12 +217,12 @@ export function extractCuratedFields(
 
   const frameNo = (normalized.frameNo ?? "").trim();
   if (!frameNo) {
-    throw new Error('Missing "Frame No" — required for de-duplication');
+    throw new Error('Missing "FRAME NO" — required for de-duplication');
   }
 
   // Date is mandatory: a blank cell and an unparseable one both reject the row.
   if (!normalized.saleDate) {
-    throw new Error('Missing or unreadable "Date" — required (use dd/mm/yyyy)');
+    throw new Error('Missing or unreadable "DATE" — required (use mm/dd/yyyy)');
   }
 
   return {
@@ -198,13 +233,20 @@ export function extractCuratedFields(
     customerMobile: normalized.customerMobile ?? "",
     frameNo,
     engineNo: normalized.engineNo ?? "",
-    status: "Sold",
+    // Every row in this report is a sale, so a blank STATUS cell means Sold.
+    status: normalized.status || "Sold",
     purchaseType: normalized.purchaseType ?? "",
     totalPayment: normalized.totalPayment ?? 0,
     slNo: normalized.slNo ?? "",
     saleDate: normalized.saleDate,
     location: normalized.location ?? "",
     colour: normalized.colour ?? "",
+    ew: normalized.ew ?? "",
+    amc: normalized.amc ?? "",
+    rsa: normalized.rsa ?? "",
+    joyClub: normalized.joyClub ?? "",
+    finance: normalized.finance ?? "",
+    executive: normalized.executive ?? "",
     rto: normalized.rto ?? "",
     insurance: normalized.insurance ?? "",
     hsrp: normalized.hsrp ?? "",

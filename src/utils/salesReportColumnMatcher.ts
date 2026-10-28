@@ -20,13 +20,20 @@ export interface SalesReportNormalizedRow {
   engineNo?: string;
   purchaseType?: string;
   totalPayment?: number;
-  // saleDate is mandatory in every layout (see SALES_REPORT_FIELDS).
-  // Alternative ("Sl No / DATE / CUSTOMER NAME / PHONE NO. / LOCATION / ...")
-  // layout. All optional — imported whenever the file carries the column.
+  // saleDate is mandatory in every layout (see SALES_REPORT_FIELDS); the
+  // rest are optional — imported whenever the file carries the column.
   slNo?: string;
   saleDate?: Date;
   location?: string;
   colour?: string;
+  /** EW / AMC / RSA / JOY CLUB: the register's 1 (taken) / 0 (not taken) flags, kept as written. */
+  ew?: string;
+  amc?: string;
+  rsa?: string;
+  joyClub?: string;
+  finance?: string;
+  executive?: string;
+  status?: string;
   rto?: string;
   insurance?: string;
   hsrp?: string;
@@ -37,30 +44,41 @@ interface SalesReportField {
   label: string;
   required: boolean;
   /**
-   * When true, the field is only enforced for the standard layout. A file
-   * carrying the single "Customer Name" column (the alternative layout) has
-   * no variant / first+last name / purchase type / payment columns at all.
+   * Another field whose column also meets this requirement. "Customer Name"
+   * is the one name column the template asks for, but DMS booking exports
+   * carry separate first/last name columns instead and must still import.
    */
-  optionalInAltLayout?: boolean;
+  satisfiedBy?: SalesReportField["key"];
   aliases: string[];
 }
 
 const SALES_REPORT_FIELDS: SalesReportField[] = [
-  { key: "modelName", label: "Model Name", required: true, aliases: ["Model", "Model Name"] },
+  // --- The sales register layout, in column order. Labels are the register's
+  // own headers, so a missing-column error names what the user will look for.
+  { key: "slNo", label: "SL NO.", required: false, aliases: ["Sl No", "Sl. No", "S No", "Serial No"] },
+  { key: "saleDate", label: "DATE", required: true, aliases: ["Date", "Sale Date", "Sold Date"] },
+  { key: "customerName", label: "CUSTOMER NAME", required: true, satisfiedBy: "customerFirstName", aliases: ["Customer Name", "Name"] },
+  { key: "customerMobile", label: "PHONE NO.", required: true, aliases: ["Mobile", "Contact Number", "Customer Mobile", "Contact Mobile", "Contact Mobile Phone #", "Phone No", "Phone Number"] },
+  { key: "location", label: "LOCATION", required: false, aliases: ["Location"] },
+  { key: "frameNo", label: "FRAME NO", required: true, aliases: ["Frame Number", "Chassis No", "Chassis Number", "Frame No", "Frame#"] },
+  // "ENGIN NO" is the register's own spelling — same column.
+  { key: "engineNo", label: "ENGINE NO", required: true, aliases: ["Engine Number", "Engine No", "Engine No/Motor No", "Engin No"] },
+  { key: "modelName", label: "MODEL NAME", required: true, aliases: ["Model", "Model Name"] },
+  { key: "colour", label: "COLOUR", required: false, aliases: ["Colour", "Color"] },
+  { key: "ew", label: "EW", required: false, aliases: ["EW", "Extended Warranty"] },
+  { key: "amc", label: "AMC", required: false, aliases: ["AMC"] },
+  { key: "rsa", label: "RSA", required: false, aliases: ["RSA"] },
+  { key: "joyClub", label: "JOY CLUB", required: false, aliases: ["Joy Club"] },
+  { key: "finance", label: "FINANCE", required: false, aliases: ["Finance", "Financier"] },
+  { key: "executive", label: "EXECUTIVE", required: false, aliases: ["Executive", "Sales Executive"] },
+  { key: "status", label: "STATUS", required: false, aliases: ["Status"] },
+  // --- Older layouts (DMS booking export and earlier templates). Still
+  // accepted so those files keep importing; stored whenever present.
   { key: "modelVariant", label: "Model Variant", required: false, aliases: ["Variant", "Model Variant"] },
-  { key: "customerFirstName", label: "Customer First Name", required: true, optionalInAltLayout: true, aliases: ["First Name", "Customer First Name"] },
-  { key: "customerLastName", label: "Customer Last Name", required: true, optionalInAltLayout: true, aliases: ["Last Name", "Customer Last Name"] },
-  { key: "customerMobile", label: "Contact Mobile", required: true, aliases: ["Mobile", "Contact Number", "Customer Mobile", "Contact Mobile", "Contact Mobile Phone #", "Phone No", "Phone Number"] },
-  { key: "frameNo", label: "Frame No", required: true, aliases: ["Frame Number", "Chassis No", "Chassis Number", "Frame No", "Frame#"] },
-  { key: "engineNo", label: "Engine No", required: true, aliases: ["Engine Number", "Engine No", "Engine No/Motor No", "Engin No"] },
+  { key: "customerFirstName", label: "Customer First Name", required: false, aliases: ["First Name", "Customer First Name"] },
+  { key: "customerLastName", label: "Customer Last Name", required: false, aliases: ["Last Name", "Customer Last Name"] },
   { key: "purchaseType", label: "Purchase Type", required: false, aliases: ["Purchase Type"] },
   { key: "totalPayment", label: "Total Payment", required: false, aliases: ["Total Payment", "Total Amount"] },
-  // --- Alternative layout columns (optional; stored whenever present) ---
-  { key: "customerName", label: "Customer Name", required: false, aliases: ["Customer Name", "Name"] },
-  { key: "slNo", label: "Sl No", required: false, aliases: ["Sl No", "Sl. No", "S No", "Serial No"] },
-  { key: "saleDate", label: "Date", required: true, aliases: ["Date", "Sale Date", "Sold Date"] },
-  { key: "location", label: "Location", required: false, aliases: ["Location"] },
-  { key: "colour", label: "Colour", required: false, aliases: ["Colour", "Color"] },
   { key: "rto", label: "RTO", required: false, aliases: ["RTO"] },
   { key: "insurance", label: "Insurance", required: false, aliases: ["Insurance"] },
   { key: "hsrp", label: "HSRP", required: false, aliases: ["HSRP"] },
@@ -133,12 +151,11 @@ export function matchSalesReportColumns(
     }
   });
 
-  const isAltLayout = matchedKeys.has("customerName");
   const missingRequired = SALES_REPORT_FIELDS.filter(
     (f) =>
       f.required &&
-      !(isAltLayout && f.optionalInAltLayout) &&
-      !matchedKeys.has(f.key),
+      !matchedKeys.has(f.key) &&
+      !(f.satisfiedBy && matchedKeys.has(f.satisfiedBy)),
   ).map((f) => ({ key: f.key, label: f.label }));
 
   return {
@@ -153,27 +170,43 @@ const JOIN_KEY_STRING_FIELDS = new Set(["frameNo", "engineNo"]);
 const NUMERIC_KEYS = new Set(["totalPayment"]);
 
 /**
- * Parse a date cell. Dealer exports are day-first (dd/mm/yyyy, dd-mm-yyyy);
- * a JS Date or an ISO string is accepted as-is. Returns undefined when
- * unparseable so the caller can flag the row for review instead of storing
- * garbage.
+ * Parse a date cell. Typed dates are month-first (mm/dd/yyyy, mm-dd-yy);
+ * spreadsheet date cells reach here as yyyy-mm-dd, read from the cell's value
+ * rather than its display text (see salesReport.service.ts#parseSalesReport).
+ * A JS Date is accepted as-is. Returns undefined when unparseable so the
+ * caller can reject the row instead of storing garbage.
  */
 function parseDate(raw: any): Date | undefined {
   if (raw instanceof Date) return Number.isNaN(raw.getTime()) ? undefined : raw;
   const str = stripWrappingQuotes(raw);
   if (!str) return undefined;
+  const iso = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (iso) return utcDate(Number(iso[1]), Number(iso[2]), Number(iso[3]));
   const m = str.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})/);
   if (m) {
     const year = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3]);
-    const d = new Date(Date.UTC(year, Number(m[2]) - 1, Number(m[1])));
-    return Number.isNaN(d.getTime()) ? undefined : d;
+    return utcDate(year, Number(m[1]), Number(m[2]));
   }
   const d = new Date(str);
   return Number.isNaN(d.getTime()) ? undefined : d;
 }
 
-/** Split one full-name cell into first / last (last token = last name). */
-function splitFullName(full: string): { first: string; last: string } {
+/**
+ * Date.UTC rolls an out-of-range month or day over instead of failing — a
+ * day-first 28/09/2026 read month-first would silently become April 2028 —
+ * so the result is checked against what was asked for.
+ */
+function utcDate(year: number, month: number, day: number): Date | undefined {
+  const d = new Date(Date.UTC(year, month - 1, day));
+  return d.getUTCMonth() === month - 1 && d.getUTCDate() === day ? d : undefined;
+}
+
+/**
+ * Split one full-name cell into first / last (last token = last name). Rows
+ * still store the two halves — customer search and auto-registration read
+ * them — and joining them with a space gives the name back.
+ */
+export function splitFullName(full: string): { first: string; last: string } {
   const parts = full.split(/\s+/).filter(Boolean);
   if (parts.length <= 1) return { first: parts[0] ?? "", last: "" };
   return { first: parts.slice(0, -1).join(" "), last: parts[parts.length - 1] };
@@ -271,7 +304,7 @@ export function buildSalesReportNormalizedRow(
     if (value) (normalized as any)[canonicalKey] = value;
   });
 
-  // Alternative layout: only a single "Customer Name" column. Split it unless
+  // A single "Customer Name" column (the template's layout). Split it unless
   // the file also carried explicit first/last name columns.
   if (fullName && !normalized.customerFirstName && !normalized.customerLastName) {
     const { first, last } = splitFullName(fullName);

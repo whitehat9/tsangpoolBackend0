@@ -5,6 +5,7 @@ import { SalesReportModel } from "../../models/SalesReport";
 import {
   parseSalesReport,
   extractCuratedFields,
+  carryDateForward,
 } from "../../service/salesReport.service";
 import { matchSalesReportColumns } from "../../utils/salesReportColumnMatcher";
 import {
@@ -83,6 +84,8 @@ export const importSalesReport = asyncHandler(
       );
     }
 
+    carryDateForward(parsed.rows, matchResult);
+
     const batchId = `SR-${Date.now()}-${Math.random()
       .toString(36)
       .substring(2, 8)
@@ -108,7 +111,10 @@ export const importSalesReport = asyncHandler(
         error: string;
       }[],
       created: [] as string[],
+      /** Models priced by neither the bike catalogue nor CSV stock — their rows import at 0. */
+      unpricedModels: [] as { model: string; rows: number }[],
     };
+    const unpriced = new Map<string, number>();
 
     for (let i = 0; i < parsed.rows.length; i++) {
       const { data } = parsed.rows[i];
@@ -123,8 +129,9 @@ export const importSalesReport = asyncHandler(
           isActive: true,
         });
         if (existing) {
+          // Name the batch so the user can find and delete it to re-import.
           throw new Error(
-            `Duplicate row (Frame No "${curated.frameNo}" already imported)`,
+            `Duplicate row (Frame No "${curated.frameNo}" already imported in batch ${existing.importBatch})`,
           );
         }
 
@@ -145,6 +152,20 @@ export const importSalesReport = asyncHandler(
           req.user!._id as unknown as mongoose.Types.ObjectId,
         );
 
+        const totalPayment =
+          curated.totalPayment ||
+          outcome.totalPayment ||
+          (await lookupExShowroom(null, curated.modelName, curated.engineNo));
+        // A zero total means the model is in neither the bike catalogue nor
+        // any stock upload — flag the row and name the model rather than
+        // import it silently.
+        if (!totalPayment) {
+          const model = curated.modelName || "(blank model name)";
+          unpriced.set(model, (unpriced.get(model) ?? 0) + 1);
+        }
+        const needsReview =
+          curated.needsReview || outcome.needsReview || !totalPayment;
+
         const count = await SalesReportModel.countDocuments();
         const saleReportId = `SR-${Date.now()}-${String(count + 1).padStart(5, "0")}`;
 
@@ -162,20 +183,23 @@ export const importSalesReport = asyncHandler(
           engineNo: curated.engineNo,
           status: curated.status,
           purchaseType: curated.purchaseType,
-          totalPayment:
-            curated.totalPayment ||
-            outcome.totalPayment ||
-            (await lookupExShowroom(null, curated.modelName)),
+          totalPayment,
           slNo: curated.slNo,
           saleDate: curated.saleDate,
           location: curated.location,
           colour: curated.colour,
+          ew: curated.ew,
+          amc: curated.amc,
+          rsa: curated.rsa,
+          joyClub: curated.joyClub,
+          finance: curated.finance,
+          executive: curated.executive,
           rto: curated.rto,
           insurance: curated.insurance,
           hsrp: curated.hsrp,
           matchOutcome: outcome.outcome,
           matched: outcome.matched,
-          needsReview: curated.needsReview || outcome.needsReview,
+          needsReview,
           matchedStockId: outcome.matchedStockId,
           matchedStockType: outcome.matchedStockType,
           customerId: outcome.customerId,
@@ -189,7 +213,7 @@ export const importSalesReport = asyncHandler(
 
         results.created.push(saleReportId);
         results.successCount++;
-        if (curated.needsReview || outcome.needsReview) results.reviewCount++;
+        if (needsReview) results.reviewCount++;
         if (
           outcome.outcome === "matched_status_flipped" ||
           outcome.outcome === "matched_manual_form_status_flipped"
@@ -208,6 +232,7 @@ export const importSalesReport = asyncHandler(
       }
     }
 
+    results.unpricedModels = [...unpriced].map(([model, rows]) => ({ model, rows }));
     results.success = results.failureCount === 0;
 
     logger.info(
