@@ -3,6 +3,7 @@ import { Request, Response } from "express";
 import mongoose from "mongoose";
 import { SalesReportModel } from "../../models/SalesReport";
 import { normalizePhone } from "../../service/salesReport.service";
+import { reverseSalesReportRows } from "../../service/salesReport/reverseSalesReportBatch.service";
 import { splitFullName } from "../../utils/salesReportColumnMatcher";
 import { getUserBranch, getUserRole, isAdmin } from "../../types/user.types";
 
@@ -116,15 +117,17 @@ export const updateSalesReportRow = asyncHandler(
 );
 
 /**
- * @desc    Soft delete a single sales report row, audited like the batch
- *          delete (and, like it, without reverting matched stock/customer
- *          records). Frees the Frame No for re-import.
+ * @desc    Soft delete a single sales report row, audited and reversing its
+ *          stock/vehicle/customer effects exactly like the batch delete.
+ *          Frees the Frame No for re-import.
  * @route   DELETE /api/sales-report/:id
  * @access  Super-Admin (any), Branch-Admin (own branch)
  */
 export const deleteSalesReportRow = asyncHandler(
   async (req: Request, res: Response) => {
     const row = await loadScopedRow(req, res);
+
+    const reversed = await reverseSalesReportRows([row]);
 
     row.isActive = false;
     row.deletedBy = req.user!._id as unknown as mongoose.Types.ObjectId;
@@ -135,6 +138,7 @@ export const deleteSalesReportRow = asyncHandler(
     res.status(200).json({
       success: true,
       message: "Sales report record deleted",
+      data: reversed,
     });
   },
 );

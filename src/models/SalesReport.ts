@@ -66,6 +66,13 @@ export interface ISalesReport extends Document {
   customerId?: mongoose.Types.ObjectId;
   customerVehicleId?: mongoose.Types.ObjectId;
 
+  // What this row's import changed elsewhere, recorded so deleting the batch
+  // can undo exactly that (see service/salesReport/reverseSalesReportBatch.service.ts).
+  // Absent on rows written before these fields existed — those are reversed
+  // from matchOutcome alone, and never delete a customer.
+  stockPreviousStatus?: string;
+  customerCreatedByImport?: boolean;
+
   // Batch/import metadata
   importBatch: string;
   importDate: Date;
@@ -200,6 +207,8 @@ const SalesReportSchema = new Schema<ISalesReport>(
       type: Schema.Types.ObjectId,
       ref: "CustomerVehicle",
     },
+    stockPreviousStatus: { type: String },
+    customerCreatedByImport: { type: Boolean },
     importBatch: {
       type: String,
       required: true,
