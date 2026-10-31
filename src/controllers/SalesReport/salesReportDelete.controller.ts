@@ -1,15 +1,15 @@
 import asyncHandler from "express-async-handler";
 import { Request, Response } from "express";
 import { SalesReportModel } from "../../models/SalesReport";
+import { reverseSalesReportRows } from "../../service/salesReport/reverseSalesReportBatch.service";
 import { getUserBranch, getUserRole, isAdmin } from "../../types/user.types";
 
 /**
- * @desc    Soft delete a sales report batch (all its rows), audited. Does
- *          NOT revert matched StockConceptCSV/CustomerVehicle records — soft
- *          delete hides the report rows from audit, consistent with every
- *          other soft-delete flow in this codebase, and reverting
- *          automatically risks clobbering unrelated downstream work on that
- *          vehicle/customer since the sale.
+ * @desc    Soft delete a sales report batch (all its rows), audited, and undo
+ *          what the import did elsewhere: stock flipped to Sold goes back,
+ *          the CustomerVehicle and BaseCustomer it created are removed. Each
+ *          is skipped (and reported in `kept`) if it has been used since the
+ *          sale — see service/salesReport/reverseSalesReportBatch.service.ts.
  * @route   DELETE /api/sales-report/batches/:batchId
  * @access  Super-Admin (any), Branch-Admin (own branch)
  */
@@ -34,6 +34,12 @@ export const deleteSalesReportBatch = asyncHandler(
       }
     }
 
+    const rows = await SalesReportModel.find({
+      importBatch: batchId,
+      isActive: true,
+    });
+    const reversed = await reverseSalesReportRows(rows);
+
     await SalesReportModel.updateMany(
       { importBatch: batchId, isActive: true },
       {
@@ -47,6 +53,7 @@ export const deleteSalesReportBatch = asyncHandler(
     res.status(200).json({
       success: true,
       message: `Sales report batch ${batchId} deleted`,
+      data: reversed,
     });
   },
 );

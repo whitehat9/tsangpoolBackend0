@@ -18,6 +18,7 @@ import {
   unassignCSVStock,
   updateCSVStockStatus,
 } from "../../controllers/VASnStock/csvStockImport.controller";
+import { searchStock } from "../../controllers/VASnStock/stockSearch.controller";
 import { getStockBatchReports } from "../../controllers/VASnStock/stockBatchReport.controller";
 import { getStockInvestmentTimeseries } from "../../controllers/VASnStock/stockInvestmentTimeseries.controller";
 import { getCSVStockAssignStats } from "../../controllers/VASnStock/AssignToCustomer/StockAssign";
@@ -62,6 +63,15 @@ router.get(
   protect,
   authorize("Super-Admin", "Branch-Admin"),
   getStockInvestmentTimeseries,
+);
+
+// Engine / Chassis lookup across CSV + manual stock — literal path, so it must
+// stay above the generic /:stockId below.
+router.get(
+  "/search",
+  protect,
+  authorize("Super-Admin", "Branch-Admin"),
+  searchStock,
 );
 
 router.get(

@@ -47,6 +47,23 @@ export const getAllSalesReports = asyncHandler(
     }
     if (req.query.purchaseType) query.purchaseType = req.query.purchaseType;
 
+    // Global lookup by phone number, Frame No or Engine No across every batch
+    // (still branch-scoped above). Contains-match, case-insensitive; 3+ chars so
+    // a stray keystroke can't scan the whole collection.
+    const search = String(req.query.search ?? "").trim();
+    if (search) {
+      if (search.length < 3) {
+        res.status(400);
+        throw new Error("Search needs at least 3 characters");
+      }
+      const rx = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+      query.$or = [
+        { customerMobile: rx },
+        { frameNo: rx },
+        { engineNo: rx },
+      ];
+    }
+
     // Sale-date window (yyyy-mm-dd, `to` exclusive) — what the dashboards use
     // to list the sales behind a selected month.
     const from = req.query.from ? new Date(String(req.query.from)) : null;

@@ -273,6 +273,8 @@ export interface ProcessSalesReportRowResult {
   modelVariant?: string;
   /** True when this row is what brought the BaseCustomer into existence. */
   customerCreated: boolean;
+  /** Stock status before this row flipped it to Sold — set only when it did flip. */
+  stockPreviousStatus?: string;
 }
 
 /**
@@ -448,6 +450,7 @@ export async function processSalesReportRow(
       };
     }
 
+    const manualPrevious = manualDoc.stockStatus.status;
     manualDoc.stockStatus.status = "Sold";
     await manualDoc.save();
 
@@ -459,6 +462,7 @@ export async function processSalesReportRow(
       matchedStockType: "StockConcept",
       customerId,
       customerCreated,
+      stockPreviousStatus: manualPrevious,
     };
   }
 
@@ -520,6 +524,7 @@ export async function processSalesReportRow(
     insurance: false,
   });
 
+  const csvPrevious = stockDoc.stockStatus.status;
   stockDoc.stockStatus.status = "Sold";
   stockDoc.salesInfo = {
     soldTo: customerId,
@@ -540,5 +545,6 @@ export async function processSalesReportRow(
     customerId,
     customerVehicleId: vehicle._id as unknown as mongoose.Types.ObjectId,
     customerCreated,
+    stockPreviousStatus: csvPrevious,
   };
 }

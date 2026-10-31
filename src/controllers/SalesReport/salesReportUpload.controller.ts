@@ -6,6 +6,7 @@ import {
   parseSalesReport,
   extractCuratedFields,
   carryDateForward,
+  isPlaceholderRow,
 } from "../../service/salesReport.service";
 import { matchSalesReportColumns } from "../../utils/salesReportColumnMatcher";
 import {
@@ -86,6 +87,17 @@ export const importSalesReport = asyncHandler(
 
     carryDateForward(parsed.rows, matchResult);
 
+    // Pre-formatted rows past the register's last sale (SL NO. only) are
+    // skipped up front so they neither fail nor inflate the row total.
+    const placeholder = parsed.rows.map(({ data }) =>
+      isPlaceholderRow(data, matchResult),
+    );
+    const skippedRows = placeholder.filter(Boolean).length;
+    if (skippedRows === parsed.rows.length) {
+      res.status(400);
+      throw new Error("No rows could be extracted from the file");
+    }
+
     const batchId = `SR-${Date.now()}-${Math.random()
       .toString(36)
       .substring(2, 8)
@@ -94,7 +106,9 @@ export const importSalesReport = asyncHandler(
 
     const results = {
       success: false,
-      totalRows: parsed.rows.length,
+      totalRows: parsed.rows.length - skippedRows,
+      /** Empty pre-formatted rows (SL NO. only) — ignored, not failed. */
+      skippedRows,
       successCount: 0,
       failureCount: 0,
       reviewCount: 0,
@@ -117,6 +131,7 @@ export const importSalesReport = asyncHandler(
     const unpriced = new Map<string, number>();
 
     for (let i = 0; i < parsed.rows.length; i++) {
+      if (placeholder[i]) continue;
       const { data } = parsed.rows[i];
       const rowNumber = i + 2; // header is row 1
 
@@ -204,6 +219,8 @@ export const importSalesReport = asyncHandler(
           matchedStockType: outcome.matchedStockType,
           customerId: outcome.customerId,
           customerVehicleId: outcome.customerVehicleId,
+          stockPreviousStatus: outcome.stockPreviousStatus,
+          customerCreatedByImport: outcome.customerCreated,
           importBatch: batchId,
           importDate,
           fileName: file.originalname,

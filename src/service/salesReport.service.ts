@@ -166,8 +166,12 @@ export async function parseSalesReport(
  * A sales register writes each day's DATE once, in a cell merged down that
  * day's rows. A spreadsheet upload keeps the merge (see parseSalesReport), but
  * a CSV export flattens it to the first row with blanks under it — so a blank
- * DATE is read as "same day as the row above". The first row's DATE must still
- * be filled in; a blank there has nothing to inherit and is rejected.
+ * DATE is read as "same day as the row above".
+ *
+ * Copying a merged block out of Excel (or Excel Online) can land the single
+ * date mid-block instead of on its first row, leaving blank rows ABOVE it. One
+ * date covers its whole block, so those leading blanks take the first date
+ * found below them. A file with no date anywhere still rejects every row.
  */
 export function carryDateForward(
   rows: ParsedRow[],
@@ -186,6 +190,40 @@ export function carryDateForward(
       lastDate = data[dateColumn];
     }
   }
+
+  // Leading blanks (nothing above to inherit): adopt the first date below.
+  const firstDate = rows
+    .map(({ data }) => data[dateColumn])
+    .find((v) => String(v ?? "").trim() !== "");
+  if (firstDate === undefined) return;
+  for (const { data } of rows) {
+    if (String(data[dateColumn] ?? "").trim() !== "") break;
+    data[dateColumn] = firstDate;
+  }
+}
+
+/**
+ * Registers are pre-formatted well past the last sale: rows that carry only a
+ * pre-numbered SL NO. (plus, once carryDateForward runs, an inherited DATE)
+ * and nothing else. Such a row records no sale, so it is skipped rather than
+ * failed — otherwise a 286-sale register formatted down to row 951 reports
+ * ~665 "Missing FRAME NO" failures that bury the real errors. A row with any
+ * identifying field (frame, engine, name, phone, model) is a real sale and
+ * still fails loudly when its Frame No is blank.
+ */
+export function isPlaceholderRow(
+  data: Record<string, any>,
+  matchResult: SalesReportColumnMatchResult,
+): boolean {
+  const { normalized } = buildSalesReportNormalizedRow(data, matchResult);
+  return !(
+    normalized.frameNo ||
+    normalized.engineNo ||
+    normalized.customerFirstName ||
+    normalized.customerLastName ||
+    normalized.customerMobile ||
+    normalized.modelName
+  );
 }
 
 const PHONE_REGEX = /^[6-9]\d{9}$/;
