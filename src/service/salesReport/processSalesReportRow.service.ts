@@ -3,9 +3,7 @@ import { BaseCustomerModel } from "../../models/CustomerSystem/BaseCustomer";
 import { CustomerVehicleModel } from "../../models/BikeSystemModel2/CustomerVehicleModel";
 import { StockConceptCSVModel } from "../../models/BikeSystemModel3/StockConceptCSV";
 import { StockConceptModel } from "../../models/BikeSystemModel2/StockConcept";
-import { SalesReportModel } from "../../models/SalesReport";
 import { normalizePhone } from "../salesReport.service";
-import BikesModel from "../../models/BikeSystemModel/Bikes";
 import logger from "../../utils/logger";
 
 export type SalesReportRowOutcome =
@@ -14,237 +12,6 @@ export type SalesReportRowOutcome =
   | "matched_already_sold"
   | "unmatched"
   | "customer_conflict";
-
-interface CatalogueEntry {
-  key: string;
-  exShowroom: number;
-  variants: { key: string; adjustment: number }[];
-}
-
-let catalogueCache: { at: number; entries: CatalogueEntry[] } | null = null;
-const CATALOGUE_TTL_MS = 60_000;
-
-/**
- * The sales register abbreviates variants the catalogue spells out — DISK and
- * DC for Disc, DR for Drum, STD for Standard.
- */
-const TOKEN_SYNONYMS: Record<string, string> = {
-  DISK: "DISC",
-  DC: "DISC",
-  DR: "DRUM",
-  STANDARD: "STD",
-};
-
-/**
- * The register names the 110 cc scooters without their displacement
- * ("ACTIVA DLX", "DIO STD") but always writes it for the 125s ("ACTIVA 125
- * DISC"), while the catalogue always carries it. SCV110 is Honda's product
- * code for the Activa 110, which sometimes lands in the MODEL NAME cell.
- * Applied to register labels only.
- */
-const FAMILY_ALIASES: [RegExp, string][] = [
-  [/^SCV110\w*/, "ACTIVA 110"],
-  [/^ACTIVA\b(?! \d)/, "ACTIVA 110"],
-  [/^DIO\b(?! \d)/, "DIO 110"],
-];
-
-/**
- * Normalise a model/variant label so "SHINE 100-OBD2B" and the catalogue's
- * "Shine 100" compare equal: uppercase, drop emission-norm suffixes, turn
- * punctuation into spaces, unify variant abbreviations.
- */
-function normalizeModelKey(raw: string): string {
-  return raw
-    .toUpperCase()
-    .replace(/\b(OBD\s*2\s*B?|BS\s*-?\s*(VI|6)|BSVI)\b/g, " ")
-    .replace(/[^A-Z0-9]+/g, " ")
-    .trim()
-    .split(" ")
-    .map((t) => TOKEN_SYNONYMS[t] ?? t)
-    .join(" ");
-}
-
-async function loadCatalogue(): Promise<CatalogueEntry[]> {
-  if (catalogueCache && Date.now() - catalogueCache.at < CATALOGUE_TTL_MS)
-    return catalogueCache.entries;
-  const bikes = await BikesModel.find({ isActive: true })
-    .select("modelName variants priceBreakdown.exShowroomPrice")
-    .lean();
-  const entries: CatalogueEntry[] = bikes
-    .filter((b: any) => b.priceBreakdown?.exShowroomPrice > 0)
-    .map((b: any) => ({
-      key: normalizeModelKey(b.modelName),
-      exShowroom: b.priceBreakdown.exShowroomPrice,
-      variants: (b.variants ?? []).map((v: any) => ({
-        key: normalizeModelKey(v.name),
-        adjustment: v.priceAdjustment ?? 0,
-      })),
-    }));
-  catalogueCache = { at: Date.now(), entries };
-  return entries;
-}
-
-/** A register/stock model label normalised, with its CC filled in where the register leaves it out. */
-function registerModelKey(label: string): string {
-  let key = normalizeModelKey(label);
-  for (const [pattern, family] of FAMILY_ALIASES)
-    key = key.replace(pattern, family);
-  return key;
-}
-
-/** A label with only case and punctuation normalised — "-OBD2" and "OBD2B" stay distinct. */
-const exactModelKey = (label: string) =>
-  label.toUpperCase().replace(/[^A-Z0-9]+/g, " ").trim();
-
-interface StockPrices {
-  /** By exactModelKey: the same model and emission norm. */
-  exact: Map<string, number>;
-  /** By registerModelKey: "-OBD2" and "-OBD2B" stock of one model share a key; the most recently imported wins. */
-  byModel: Map<string, number>;
-}
-
-let stockPriceCache: { at: number; prices: StockPrices } | null = null;
-
-/** Latest cost price per model in the Daily Stock (CSV) uploads. */
-async function loadStockPrices(): Promise<StockPrices> {
-  if (stockPriceCache && Date.now() - stockPriceCache.at < CATALOGUE_TTL_MS)
-    return stockPriceCache.prices;
-  const rows = await StockConceptCSVModel.aggregate([
-    { $match: { isActive: { $ne: false }, costPrice: { $gt: 0 } } },
-    { $sort: { csvImportDate: -1 } },
-    {
-      $group: {
-        _id: "$modelVariant",
-        costPrice: { $first: "$costPrice" },
-        at: { $first: "$csvImportDate" },
-      },
-    },
-    { $sort: { at: -1 } },
-  ]);
-  const prices: StockPrices = { exact: new Map(), byModel: new Map() };
-  for (const r of rows) {
-    const label = String(r._id ?? "");
-    const exact = exactModelKey(label);
-    const model = registerModelKey(label);
-    if (exact && !prices.exact.has(exact)) prices.exact.set(exact, r.costPrice);
-    if (model && !prices.byModel.has(model)) prices.byModel.set(model, r.costPrice);
-  }
-  stockPriceCache = { at: Date.now(), prices };
-  return prices;
-}
-
-/**
- * The catalogue model a register label names: the longest catalogue model
- * name the label starts with (so "SHINE 100-OBD2B" resolves to "Shine 100"),
- * plus whatever follows it, as tokens, for variant matching. Catalogue names
- * carry the CC ("Activa 125", "Dio 110"), so this matches on name and CC.
- */
-function findCatalogueModel(
-  label: string,
-  catalogue: CatalogueEntry[],
-): { entry: CatalogueEntry; rest: Set<string> } | null {
-  const input = registerModelKey(label);
-  if (!input) return null;
-  const entry = catalogue
-    .filter((c) => input === c.key || input.startsWith(c.key + " "))
-    .sort((a, b) => b.key.length - a.key.length)[0];
-  if (!entry) return null;
-  const rest = input.slice(entry.key.length).trim();
-  return { entry, rest: new Set(rest ? rest.split(" ") : []) };
-}
-
-/**
- * The model's price plus the priceAdjustment of the variant the label names
- * (e.g. "SP125 DLX DISK" -> Disc). A variant matches when all its words appear
- * in the label; single letters are ignored so the catalogue's "H-Smart"
- * matches the register's "SMART". The most specific variant wins.
- */
-function priceFromCatalogue(label: string, catalogue: CatalogueEntry[]): number {
-  const found = findCatalogueModel(label, catalogue);
-  if (!found) return 0;
-  const variant = found.entry.variants
-    .map((v) => ({ v, words: v.key.split(" ").filter((t) => t.length > 1) }))
-    .filter(({ words }) => words.length > 0 && words.every((t) => found.rest.has(t)))
-    .sort((a, b) => b.words.length - a.words.length)[0]?.v;
-  return found.entry.exShowroom + (variant?.adjustment ?? 0);
-}
-
-/**
- * A row with no model name at all ("-" or blank) is priced from its engine
- * number: the first five characters identify the model family (JK36E is the
- * Activa 110), so the model names already recorded against that prefix — in
- * stock or in earlier sales — say which catalogue model it is. Used only when
- * those names all resolve to the same model, at that model's base price,
- * since the variant can't be known this way.
- */
-async function priceFromEngineFamily(
-  engineNo: string,
-  catalogue: CatalogueEntry[],
-): Promise<number> {
-  const prefix = engineNo.trim().toUpperCase().slice(0, 5);
-  if (!/^[A-Z0-9]{5}$/.test(prefix)) return 0;
-  const startsWith = new RegExp(`^${prefix}`);
-  const [stockNames, soldNames] = await Promise.all([
-    StockConceptCSVModel.distinct("modelVariant", { engineNumber: startsWith }),
-    SalesReportModel.distinct("modelName", { engineNo: startsWith, isActive: true }),
-  ]);
-  const models = new Map<string, CatalogueEntry>();
-  for (const name of [...stockNames, ...soldNames]) {
-    const found = findCatalogueModel(String(name ?? ""), catalogue);
-    if (found) models.set(found.entry.key, found.entry);
-  }
-  return models.size === 1 ? [...models.values()][0].exShowroom : 0;
-}
-
-/**
- * Price used when a sales report row carries no Total Payment. Order:
- *   (1) an "Ex-Showroom" column preserved in the matched CSV stock's own row;
- *   (2) the bike catalogue's ex-showroom price, by the stock's model variant
- *       then the row's model name (see priceFromCatalogue);
- *   (3) the Daily Stock (CSV) upload's price — the matched vehicle's own, else
- *       the latest one for the same model — for models the catalogue lacks
- *       (NX200, SP160, ...). This is the dealer's cost, so it ranks below the
- *       catalogue's selling price;
- *   (4) for a row with no model name, its engine family (see
- *       priceFromEngineFamily).
- * Needs no stock match beyond (1) and the first half of (3). Returns 0 only
- * when the model is in neither the bike catalogue nor any stock upload.
- */
-export async function lookupExShowroom(
-  stockDoc: {
-    modelVariant?: string;
-    csvData?: Record<string, any>;
-    costPrice?: number;
-  } | null,
-  rowModelName: string,
-  engineNo = "",
-): Promise<number> {
-  for (const [key, value] of Object.entries(stockDoc?.csvData ?? {})) {
-    if (!/ex[\s._-]*showroom/i.test(key)) continue;
-    const n = parseFloat(String(value ?? "").replace(/[^\d.]/g, ""));
-    if (Number.isFinite(n) && n > 0) return n;
-  }
-
-  const labels = [stockDoc?.modelVariant ?? "", rowModelName];
-  const catalogue = await loadCatalogue();
-  for (const label of labels) {
-    const price = priceFromCatalogue(label, catalogue);
-    if (price > 0) return price;
-  }
-
-  if (stockDoc?.costPrice && stockDoc.costPrice > 0) return stockDoc.costPrice;
-  const stockPrices = await loadStockPrices();
-  for (const label of labels) {
-    const price =
-      stockPrices.exact.get(exactModelKey(label)) ??
-      stockPrices.byModel.get(registerModelKey(label));
-    if (price) return price;
-  }
-
-  if (!normalizeModelKey(rowModelName) && engineNo)
-    return priceFromEngineFamily(engineNo, catalogue);
-  return 0;
-}
 
 export interface ProcessSalesReportRowInput {
   modelName: string;
@@ -267,7 +34,7 @@ export interface ProcessSalesReportRowResult {
   matchedStockType?: "StockConceptCSV" | "StockConcept";
   customerId?: mongoose.Types.ObjectId;
   customerVehicleId?: mongoose.Types.ObjectId;
-  /** Total actually used: the row's own value, else the matched CSV stock's ex-showroom price. */
+  /** Total actually used: the row's EX SHOWROOM + INSURANCE + REGISTRATION. */
   totalPayment?: number;
   /** Model variant taken from the matched CSV stock when the row had none. */
   modelVariant?: string;
@@ -400,12 +167,9 @@ export async function processSalesReportRow(
       })
     : null;
 
-  // Total Payment is optional on the upload: when the row has none, use the
-  // ex-showroom price of the matched CSV stock (see lookupExShowroom). Likewise the model variant.
-  const resolvedTotal =
-    row.totalPayment > 0
-      ? row.totalPayment
-      : await lookupExShowroom(stockDoc, row.modelName, row.engineNo);
+  // The total is the sum of the row's EX SHOWROOM + INSURANCE + REGISTRATION,
+  // worked out by the caller — nothing is looked up from stock or the catalogue.
+  const resolvedTotal = row.totalPayment;
   const resolvedVariant = row.modelVariant || stockDoc?.modelVariant || "";
   const derived = {
     totalPayment: resolvedTotal,

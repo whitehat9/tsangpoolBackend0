@@ -2,7 +2,86 @@ import asyncHandler from "express-async-handler";
 import { Request, Response } from "express";
 import mongoose from "mongoose";
 import { SalesReportModel } from "../../models/SalesReport";
+import { SalesReportPendingModel } from "../../models/SalesReportPending";
 import { getUserBranch, isAdmin } from "../../types/user.types";
+
+/** Earliest / latest sale date and the yyyy-mm months a batch spans, across imported and pending rows. */
+function saleSpan(parts: any[]) {
+  const dates = parts.flatMap((p) => [p?.firstSaleDate, p?.lastSaleDate]).filter(Boolean) as Date[];
+  const months = new Set(parts.flatMap((p) => p?.saleMonths ?? []).filter(Boolean) as string[]);
+  return {
+    firstSaleDate: dates.length ? new Date(Math.min(...dates.map((d) => +d))) : null,
+    lastSaleDate: dates.length ? new Date(Math.max(...dates.map((d) => +d))) : null,
+    saleMonths: [...months].sort(),
+  };
+}
+
+/**
+ * Batch folders for the dashboard: the imported rows per batch, plus the rows
+ * of each batch still waiting on EX SHOWROOM / INSURANCE / REGISTRATION
+ * (`pendingCount`). A batch whose rows are ALL pending has nothing in
+ * SalesReport yet, but must still show as a folder — that is where the
+ * pending rows are edited from.
+ */
+async function toBatchList(
+  imported: any[],
+  pendingMatch: Record<string, any>,
+) {
+  const pending: { _id: string; count: number; firstSaleDate?: Date; lastSaleDate?: Date; saleMonths: (string | null)[]; fileName: string; sourceFormat: string; importDate: Date; branchId: any }[] =
+    await SalesReportPendingModel.aggregate([
+      { $match: pendingMatch },
+      {
+        $group: {
+          _id: "$importBatch",
+          count: { $sum: 1 },
+          fileName: { $first: "$fileName" },
+          sourceFormat: { $first: "$sourceFormat" },
+          importDate: { $first: "$importDate" },
+          branchId: { $first: "$branchId" },
+          firstSaleDate: { $min: "$saleDate" },
+          lastSaleDate: { $max: "$saleDate" },
+          saleMonths: { $addToSet: { $dateToString: { format: "%Y-%m", date: "$saleDate" } } },
+        },
+      },
+    ]);
+  const pendingByBatch = new Map(pending.map((p) => [p._id, p]));
+
+  const rows = imported.map((b) => ({
+    batchId: b._id as string,
+    fileName: b.fileName,
+    sourceFormat: b.sourceFormat,
+    importDate: b.importDate,
+    branchId: b.branchId,
+    totalRecords: b.totalRecords,
+    totalPayment: b.totalPayment,
+    matchedCount: b.matchedCount,
+    unmatchedCount: b.unmatchedCount,
+    reviewCount: b.reviewCount,
+    pendingCount: pendingByBatch.get(b._id)?.count ?? 0,
+    ...saleSpan([b, pendingByBatch.get(b._id)]),
+  }));
+  const seen = new Set(rows.map((r) => r.batchId));
+  for (const p of pending) {
+    if (seen.has(p._id)) continue;
+    rows.push({
+      batchId: p._id,
+      fileName: p.fileName,
+      sourceFormat: p.sourceFormat,
+      importDate: p.importDate,
+      branchId: p.branchId,
+      totalRecords: 0,
+      totalPayment: 0,
+      matchedCount: 0,
+      unmatchedCount: 0,
+      reviewCount: 0,
+      pendingCount: p.count,
+      ...saleSpan([p]),
+    });
+  }
+  return rows.sort(
+    (a, b) => new Date(b.importDate).getTime() - new Date(a.importDate).getTime(),
+  );
+}
 
 /**
  * Branch filter for list/batches:
@@ -149,6 +228,7 @@ export const getSalesReportBatches = asyncHandler(
 
     const match: Record<string, any> = { isActive: true };
     if (branch !== "all") match.branchId = branch;
+    const { isActive: _a, ...pendingMatch } = match;
 
     const batches = await SalesReportModel.aggregate([
       { $match: match },
@@ -171,6 +251,9 @@ export const getSalesReportBatches = asyncHandler(
           reviewCount: {
             $sum: { $cond: [{ $eq: ["$needsReview", true] }, 1, 0] },
           },
+          firstSaleDate: { $min: "$saleDate" },
+          lastSaleDate: { $max: "$saleDate" },
+          saleMonths: { $addToSet: { $dateToString: { format: "%Y-%m", date: "$saleDate" } } },
         },
       },
       { $sort: { importDate: -1 } },
@@ -179,18 +262,7 @@ export const getSalesReportBatches = asyncHandler(
 
     res.status(200).json({
       success: true,
-      data: batches.map((b) => ({
-        batchId: b._id,
-        fileName: b.fileName,
-        sourceFormat: b.sourceFormat,
-        importDate: b.importDate,
-        branchId: b.branchId,
-        totalRecords: b.totalRecords,
-        totalPayment: b.totalPayment,
-        matchedCount: b.matchedCount,
-        unmatchedCount: b.unmatchedCount,
-        reviewCount: b.reviewCount,
-      })),
+      data: await toBatchList(batches, pendingMatch),
     });
   },
 );
@@ -229,6 +301,7 @@ export const getSalesReportBatchesByDate = asyncHandler(
       importDate: { $gte: startOfDay, $lt: endOfDay },
     };
     if (branch !== "all") match.branchId = branch;
+    const { isActive: _a, ...pendingMatch } = match;
 
     const batches = await SalesReportModel.aggregate([
       { $match: match },
@@ -251,6 +324,9 @@ export const getSalesReportBatchesByDate = asyncHandler(
           reviewCount: {
             $sum: { $cond: [{ $eq: ["$needsReview", true] }, 1, 0] },
           },
+          firstSaleDate: { $min: "$saleDate" },
+          lastSaleDate: { $max: "$saleDate" },
+          saleMonths: { $addToSet: { $dateToString: { format: "%Y-%m", date: "$saleDate" } } },
         },
       },
       { $sort: { importDate: -1 } },
@@ -258,18 +334,7 @@ export const getSalesReportBatchesByDate = asyncHandler(
 
     res.status(200).json({
       success: true,
-      data: batches.map((b) => ({
-        batchId: b._id,
-        fileName: b.fileName,
-        sourceFormat: b.sourceFormat,
-        importDate: b.importDate,
-        branchId: b.branchId,
-        totalRecords: b.totalRecords,
-        totalPayment: b.totalPayment,
-        matchedCount: b.matchedCount,
-        unmatchedCount: b.unmatchedCount,
-        reviewCount: b.reviewCount,
-      })),
+      data: await toBatchList(batches, pendingMatch),
     });
   },
 );

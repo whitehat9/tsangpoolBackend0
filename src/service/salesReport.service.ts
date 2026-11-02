@@ -29,7 +29,6 @@ export interface CuratedSalesReportFields {
   engineNo: string;
   status: string;
   purchaseType: string;
-  totalPayment: number;
   slNo: string;
   saleDate?: Date;
   location: string;
@@ -40,8 +39,12 @@ export interface CuratedSalesReportFields {
   joyClub: string;
   finance: string;
   executive: string;
+  productCode: string;
+  /** undefined = the cell was blank, so the row is held as pending. */
+  exShowroom?: number;
+  insuranceAmount?: number;
+  registrationAmount?: number;
   rto: string;
-  insurance: string;
   hsrp: string;
   needsReview: boolean;
 }
@@ -226,6 +229,19 @@ export function isPlaceholderRow(
   );
 }
 
+/** True when any of EX SHOWROOM / INSURANCE / REGISTRATION is blank. */
+export function isMissingAmounts(c: {
+  exShowroom?: number;
+  insuranceAmount?: number;
+  registrationAmount?: number;
+}): boolean {
+  return (
+    c.exShowroom === undefined ||
+    c.insuranceAmount === undefined ||
+    c.registrationAmount === undefined
+  );
+}
+
 const PHONE_REGEX = /^[6-9]\d{9}$/;
 
 /**
@@ -274,7 +290,6 @@ export function extractCuratedFields(
     // Every row in this report is a sale, so a blank STATUS cell means Sold.
     status: normalized.status || "Sold",
     purchaseType: normalized.purchaseType ?? "",
-    totalPayment: normalized.totalPayment ?? 0,
     slNo: normalized.slNo ?? "",
     saleDate: normalized.saleDate,
     location: normalized.location ?? "",
@@ -285,8 +300,11 @@ export function extractCuratedFields(
     joyClub: normalized.joyClub ?? "",
     finance: normalized.finance ?? "",
     executive: normalized.executive ?? "",
+    productCode: normalized.productCode ?? "",
+    exShowroom: normalized.exShowroom,
+    insuranceAmount: normalized.insuranceAmount,
+    registrationAmount: normalized.registrationAmount,
     rto: normalized.rto ?? "",
-    insurance: normalized.insurance ?? "",
     hsrp: normalized.hsrp ?? "",
     needsReview: parseNeedsReview,
   };

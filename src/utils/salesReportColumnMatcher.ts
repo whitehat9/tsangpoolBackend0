@@ -19,7 +19,6 @@ export interface SalesReportNormalizedRow {
   frameNo?: string;
   engineNo?: string;
   purchaseType?: string;
-  totalPayment?: number;
   // saleDate is mandatory in every layout (see SALES_REPORT_FIELDS); the
   // rest are optional — imported whenever the file carries the column.
   slNo?: string;
@@ -34,8 +33,12 @@ export interface SalesReportNormalizedRow {
   finance?: string;
   executive?: string;
   status?: string;
+  productCode?: string;
+  /** The three amounts that make up a sale's total — a row missing any of them is held as pending. */
+  exShowroom?: number;
+  insuranceAmount?: number;
+  registrationAmount?: number;
   rto?: string;
-  insurance?: string;
   hsrp?: string;
 }
 
@@ -56,7 +59,7 @@ const SALES_REPORT_FIELDS: SalesReportField[] = [
   // --- The sales register layout, in column order. Labels are the register's
   // own headers, so a missing-column error names what the user will look for.
   { key: "slNo", label: "SL NO.", required: false, aliases: ["Sl No", "Sl. No", "S No", "Serial No"] },
-  { key: "saleDate", label: "DATE", required: true, aliases: ["Date", "Sale Date", "Sold Date"] },
+  { key: "saleDate", label: "DATE", required: true, aliases: ["Date", "Sale Date", "Sold Date", "0"] },
   { key: "customerName", label: "CUSTOMER NAME", required: true, satisfiedBy: "customerFirstName", aliases: ["Customer Name", "Name"] },
   { key: "customerMobile", label: "PHONE NO.", required: true, aliases: ["Mobile", "Contact Number", "Customer Mobile", "Contact Mobile", "Contact Mobile Phone #", "Phone No", "Phone Number"] },
   { key: "location", label: "LOCATION", required: false, aliases: ["Location"] },
@@ -72,15 +75,19 @@ const SALES_REPORT_FIELDS: SalesReportField[] = [
   { key: "finance", label: "FINANCE", required: false, aliases: ["Finance", "Financier"] },
   { key: "executive", label: "EXECUTIVE", required: false, aliases: ["Executive", "Sales Executive"] },
   { key: "status", label: "STATUS", required: false, aliases: ["Status"] },
+  { key: "productCode", label: "PRODUCT CODE", required: false, aliases: ["Product Code"] },
+  // The three money columns. Optional in the file, but a row without all of
+  // them is held as pending until they are entered — see SalesReportPending.
+  { key: "exShowroom", label: "EX SHOWROOM", required: false, aliases: ["Ex Showroom", "Ex-Showroom", "Ex Showroom Price"] },
+  { key: "insuranceAmount", label: "INSURANCE", required: false, aliases: ["Insurance"] },
+  { key: "registrationAmount", label: "REGISTRATION", required: false, aliases: ["Registration", "Registration Charges"] },
   // --- Older layouts (DMS booking export and earlier templates). Still
   // accepted so those files keep importing; stored whenever present.
   { key: "modelVariant", label: "Model Variant", required: false, aliases: ["Variant", "Model Variant"] },
   { key: "customerFirstName", label: "Customer First Name", required: false, aliases: ["First Name", "Customer First Name"] },
   { key: "customerLastName", label: "Customer Last Name", required: false, aliases: ["Last Name", "Customer Last Name"] },
   { key: "purchaseType", label: "Purchase Type", required: false, aliases: ["Purchase Type"] },
-  { key: "totalPayment", label: "Total Payment", required: false, aliases: ["Total Payment", "Total Amount"] },
   { key: "rto", label: "RTO", required: false, aliases: ["RTO"] },
-  { key: "insurance", label: "Insurance", required: false, aliases: ["Insurance"] },
   { key: "hsrp", label: "HSRP", required: false, aliases: ["HSRP"] },
 ];
 
@@ -167,7 +174,7 @@ export function matchSalesReportColumns(
 }
 
 const JOIN_KEY_STRING_FIELDS = new Set(["frameNo", "engineNo"]);
-const NUMERIC_KEYS = new Set(["totalPayment"]);
+const NUMERIC_KEYS = new Set(["exShowroom", "insuranceAmount", "registrationAmount"]);
 
 /**
  * Parse a date cell. Typed dates are month-first (mm/dd/yyyy, mm-dd-yy);

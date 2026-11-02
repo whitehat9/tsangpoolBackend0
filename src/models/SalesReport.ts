@@ -46,8 +46,13 @@ export interface ISalesReport extends Document {
   finance?: string;
   executive?: string;
   rto?: string;
-  insurance?: string;
+  insurance?: string; // legacy free-text column; the amount lives in insuranceAmount
   hsrp?: string;
+  productCode?: string;
+  /** The three amounts entered on (or alongside) the sale; totalPayment is their sum. */
+  exShowroom?: number;
+  insuranceAmount?: number;
+  registrationAmount?: number;
 
   // Row-processing outcome (see processSalesReportRow.service.ts)
   matchOutcome:
@@ -168,6 +173,10 @@ const SalesReportSchema = new Schema<ISalesReport>(
     rto: { type: String, default: "" },
     insurance: { type: String, default: "" },
     hsrp: { type: String, default: "" },
+    productCode: { type: String, default: "" },
+    exShowroom: { type: Number },
+    insuranceAmount: { type: Number },
+    registrationAmount: { type: Number },
     matchOutcome: {
       type: String,
       enum: [

@@ -7,12 +7,11 @@ import {
   extractCuratedFields,
   carryDateForward,
   isPlaceholderRow,
+  isMissingAmounts,
 } from "../../service/salesReport.service";
 import { matchSalesReportColumns } from "../../utils/salesReportColumnMatcher";
-import {
-  processSalesReportRow,
-  lookupExShowroom,
-} from "../../service/salesReport/processSalesReportRow.service";
+import { SalesReportPendingModel } from "../../models/SalesReportPending";
+import { createSalesReportRecord } from "../../service/salesReport/createSalesReportRecord.service";
 import { getUserBranch, isAdmin } from "../../types/user.types";
 import logger from "../../utils/logger";
 import { notify } from "../../service/pushNotification.service";
@@ -36,7 +35,10 @@ function resolveBranchId(req: Request): string | null {
 
 /**
  * @desc    Import a Sales Report of already-sold vehicles (XLSX / CSV).
- *          Every row with a usable mobile number creates (or re-uses) a
+ *          A row missing any of EX SHOWROOM / INSURANCE / REGISTRATION is not
+ *          imported yet: it is held as pending (warning in the response) until
+ *          the amounts are entered via /api/sales-report/pending.
+ *          Every other row with a usable mobile number creates (or re-uses) a
  *          BaseCustomer — see processSalesReportRow.service.ts — regardless
  *          of whether its vehicle is found in stock. Rows that DO match
  *          StockConceptCSV by Frame No or Engine No additionally flip that
@@ -125,10 +127,10 @@ export const importSalesReport = asyncHandler(
         error: string;
       }[],
       created: [] as string[],
-      /** Models priced by neither the bike catalogue nor CSV stock — their rows import at 0. */
-      unpricedModels: [] as { model: string; rows: number }[],
+      /** Rows held because EX SHOWROOM / INSURANCE / REGISTRATION were not all filled in. */
+      pendingCount: 0,
+      warning: null as string | null,
     };
-    const unpriced = new Map<string, number>();
 
     for (let i = 0; i < parsed.rows.length; i++) {
       if (placeholder[i]) continue;
@@ -138,94 +140,47 @@ export const importSalesReport = asyncHandler(
       try {
         const curated = extractCuratedFields(data, matchResult);
 
-        const existing = await SalesReportModel.findOne({
-          branchId,
-          frameNo: curated.frameNo,
-          isActive: true,
-        });
-        if (existing) {
-          // Name the batch so the user can find and delete it to re-import.
-          throw new Error(
-            `Duplicate row (Frame No "${curated.frameNo}" already imported in batch ${existing.importBatch})`,
-          );
+        if (isMissingAmounts(curated)) {
+          // Held apart — no customer, no stock flip — until the three amounts
+          // are entered (see salesReportPending.controller.ts).
+          const [done, queued] = await Promise.all([
+            SalesReportModel.findOne({ branchId, frameNo: curated.frameNo, isActive: true }),
+            SalesReportPendingModel.findOne({ branchId, frameNo: curated.frameNo }),
+          ]);
+          const dup = done?.importBatch ?? queued?.importBatch;
+          if (dup) {
+            throw new Error(
+              `Duplicate row (Frame No "${curated.frameNo}" already imported in batch ${dup})`,
+            );
+          }
+          await SalesReportPendingModel.create({
+            ...curated,
+            rowData: data,
+            detectedColumns: parsed.columns,
+            sourceFormat: parsed.format,
+            importBatch: batchId,
+            importDate,
+            fileName: file.originalname,
+            branchId,
+            uploadedBy: req.user!._id,
+          });
+          results.pendingCount++;
+          continue;
         }
 
-        const outcome = await processSalesReportRow(
-          {
-            modelName: curated.modelName,
-            modelVariant: curated.modelVariant,
-            customerFirstName: curated.customerFirstName,
-            customerLastName: curated.customerLastName,
-            customerMobile: curated.customerMobile,
-            location: curated.location,
-            frameNo: curated.frameNo,
-            engineNo: curated.engineNo,
-            purchaseType: curated.purchaseType,
-            totalPayment: curated.totalPayment,
-          },
-          branchId,
-          req.user!._id as unknown as mongoose.Types.ObjectId,
-        );
-
-        const totalPayment =
-          curated.totalPayment ||
-          outcome.totalPayment ||
-          (await lookupExShowroom(null, curated.modelName, curated.engineNo));
-        // A zero total means the model is in neither the bike catalogue nor
-        // any stock upload — flag the row and name the model rather than
-        // import it silently.
-        if (!totalPayment) {
-          const model = curated.modelName || "(blank model name)";
-          unpriced.set(model, (unpriced.get(model) ?? 0) + 1);
-        }
-        const needsReview =
-          curated.needsReview || outcome.needsReview || !totalPayment;
-
-        const count = await SalesReportModel.countDocuments();
-        const saleReportId = `SR-${Date.now()}-${String(count + 1).padStart(5, "0")}`;
-
-        await SalesReportModel.create({
-          saleReportId,
+        const { saleReportId, outcome, needsReview } = await createSalesReportRecord({
+          curated,
+          exShowroom: curated.exShowroom!,
+          insuranceAmount: curated.insuranceAmount!,
+          registrationAmount: curated.registrationAmount!,
           rowData: data,
           detectedColumns: parsed.columns,
           sourceFormat: parsed.format,
-          modelName: curated.modelName,
-          modelVariant: curated.modelVariant || outcome.modelVariant || "",
-          customerFirstName: curated.customerFirstName,
-          customerLastName: curated.customerLastName,
-          customerMobile: curated.customerMobile,
-          frameNo: curated.frameNo,
-          engineNo: curated.engineNo,
-          status: curated.status,
-          purchaseType: curated.purchaseType,
-          totalPayment,
-          slNo: curated.slNo,
-          saleDate: curated.saleDate,
-          location: curated.location,
-          colour: curated.colour,
-          ew: curated.ew,
-          amc: curated.amc,
-          rsa: curated.rsa,
-          joyClub: curated.joyClub,
-          finance: curated.finance,
-          executive: curated.executive,
-          rto: curated.rto,
-          insurance: curated.insurance,
-          hsrp: curated.hsrp,
-          matchOutcome: outcome.outcome,
-          matched: outcome.matched,
-          needsReview,
-          matchedStockId: outcome.matchedStockId,
-          matchedStockType: outcome.matchedStockType,
-          customerId: outcome.customerId,
-          customerVehicleId: outcome.customerVehicleId,
-          stockPreviousStatus: outcome.stockPreviousStatus,
-          customerCreatedByImport: outcome.customerCreated,
           importBatch: batchId,
           importDate,
           fileName: file.originalname,
           branchId,
-          uploadedBy: req.user!._id,
+          uploadedBy: req.user!._id as unknown as mongoose.Types.ObjectId,
         });
 
         results.created.push(saleReportId);
@@ -249,7 +204,9 @@ export const importSalesReport = asyncHandler(
       }
     }
 
-    results.unpricedModels = [...unpriced].map(([model, rows]) => ({ model, rows }));
+    if (results.pendingCount > 0) {
+      results.warning = `${results.pendingCount} rows without EX SHOWROOM, INSURANCE, REGISTRATION`;
+    }
     results.success = results.failureCount === 0;
 
     logger.info(
@@ -268,7 +225,7 @@ export const importSalesReport = asyncHandler(
 
     res.status(results.success ? 201 : 207).json({
       success: true,
-      message: `Imported ${results.successCount}/${results.totalRows} sales report records (${results.customersCreated} new customers)`,
+      message: `Imported ${results.successCount}/${results.totalRows} sales report records (${results.customersCreated} new customers)${results.warning ? ` — ${results.warning}` : ""}`,
       data: results,
     });
   },

@@ -97,13 +97,27 @@ export const updateSalesReportRow = asyncHandler(
       row.customerMobile = phone ?? "";
     }
 
-    if (body.totalPayment !== undefined && body.totalPayment !== "") {
-      const n = Number(body.totalPayment);
+    // Total Payment is not editable by itself: it is always the sum of the
+    // three amounts, so editing any of them re-derives it.
+    const amounts = [
+      ["exShowroom", "exShowroom", "EX SHOWROOM"],
+      ["insurance", "insuranceAmount", "INSURANCE"],
+      ["registration", "registrationAmount", "REGISTRATION"],
+    ] as const;
+    let amountsEdited = false;
+    for (const [bodyKey, field, label] of amounts) {
+      if (body[bodyKey] === undefined || body[bodyKey] === "") continue;
+      const n = Number(body[bodyKey]);
       if (!Number.isFinite(n) || n < 0) {
         res.status(400);
-        throw new Error("Total Payment must be a non-negative number");
+        throw new Error(`${label} must be a non-negative number`);
       }
-      row.totalPayment = n;
+      row[field] = n;
+      amountsEdited = true;
+    }
+    if (amountsEdited) {
+      row.totalPayment =
+        (row.exShowroom ?? 0) + (row.insuranceAmount ?? 0) + (row.registrationAmount ?? 0);
     }
 
     await row.save();

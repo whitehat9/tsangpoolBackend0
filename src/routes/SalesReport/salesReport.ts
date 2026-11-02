@@ -17,6 +17,11 @@ import {
   deleteSalesReportRow,
 } from "../../controllers/SalesReport/salesReportRow.controller";
 import {
+  getPendingSalesReports,
+  updatePendingSalesReport,
+  deletePendingSalesReport,
+} from "../../controllers/SalesReport/salesReportPending.controller";
+import {
   deleteSalesReportBatch,
   getDeletedSalesReportBatches,
 } from "../../controllers/SalesReport/salesReportDelete.controller";
@@ -33,6 +38,12 @@ router.post(
   handleMulterError,
   importSalesReport,
 );
+
+// Rows held until EX SHOWROOM / INSURANCE / REGISTRATION are entered — Branch-Admin.
+// Registered before the generic /:id routes below so "pending" is never read as an id.
+router.get("/pending", authorize("Branch-Admin"), getPendingSalesReports);
+router.patch("/pending/:id", authorize("Branch-Admin"), updatePendingSalesReport);
+router.delete("/pending/:id", authorize("Branch-Admin"), deletePendingSalesReport);
 
 // Reads — Super-Admin (all/?branchId=), Branch-Admin (own branch)
 router.get(

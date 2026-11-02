@@ -1,6 +1,7 @@
 import asyncHandler from "express-async-handler";
 import { Request, Response } from "express";
 import { SalesReportModel } from "../../models/SalesReport";
+import { SalesReportPendingModel } from "../../models/SalesReportPending";
 import { reverseSalesReportRows } from "../../service/salesReport/reverseSalesReportBatch.service";
 import { getUserBranch, getUserRole, isAdmin } from "../../types/user.types";
 
@@ -17,10 +18,10 @@ export const deleteSalesReportBatch = asyncHandler(
   async (req: Request, res: Response) => {
     const { batchId } = req.params;
 
-    const sample = await SalesReportModel.findOne({
-      importBatch: batchId,
-      isActive: true,
-    });
+    // A batch whose rows are all still pending has no SalesReport rows yet.
+    const sample =
+      (await SalesReportModel.findOne({ importBatch: batchId, isActive: true })) ??
+      (await SalesReportPendingModel.findOne({ importBatch: batchId }));
     if (!sample) {
       res.status(404);
       throw new Error("Sales report batch not found");
@@ -39,6 +40,9 @@ export const deleteSalesReportBatch = asyncHandler(
       isActive: true,
     });
     const reversed = await reverseSalesReportRows(rows);
+
+    // Rows still waiting on their amounts go with the batch.
+    await SalesReportPendingModel.deleteMany({ importBatch: batchId });
 
     await SalesReportModel.updateMany(
       { importBatch: batchId, isActive: true },
